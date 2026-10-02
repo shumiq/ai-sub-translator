@@ -51,6 +51,18 @@ const feedbackBlock = (feedback: string | null) =>
     ? `\n<correction_required>\n${feedback}\nFix exactly this and re-emit the full chunk.\n</correction_required>\n`
     : "";
 
+/**
+ * How the model is allowed to break a cue across lines, which follows the
+ * `lineCountPerCue` check the validator will apply to its answer.
+ *
+ * Kept out of the numbered RULES so that the numbering does not shift with
+ * the flag.
+ */
+const lineBreakRule = () =>
+  appConfig.validation.lineCountPerCue
+    ? `LINE BREAKS: a cue whose source contains "\\n" must come back with exactly the same number of lines, separated by "\\n", broken at the same point. Never merge two source lines into one and never split one into two.`
+    : `LINE BREAKS: re-break each cue wherever the ${appConfig.targetLanguage} reads best. Merging the source's lines or splitting them further is fine, but never leave a cue empty and never let one run past two lines — it has to stay readable as a subtitle.`;
+
 export const TEXTS_RESPONSE_SCHEMA = {
   type: "object",
   properties: {
@@ -139,14 +151,15 @@ TASK: translate the given ${appConfig.sourceLanguage} subtitle cues into natural
 
 NON-NEGOTIABLE RULES
 1. One output entry per input cue, in the same order. Never merge cues, never split a cue, never skip a cue, never add one.
-2. Cue text may contain "\\n" between visual lines. You may reproduce or reduce those line breaks, but you must never change the number of entries.
-3. Subtitles are read at a glance. Translate for the ear of a ${appConfig.targetLanguage} viewer watching in real time: concise, idiomatic, and no more verbose than the source.
-4. Honour speaker intent — sarcasm, teasing, anger, formal register and foreign-accented speech should survive the translation.
-5. Keep established glossary renderings. Keep a character's register consistent across cues.
-6. Match the speaker's gender with natural particles: male speakers may use ครับ/อะ/นะ; female speakers may use ค่ะ/นะ/สิ. Use ครับ or ค่ะ only where the ${appConfig.sourceLanguage} original justifies the formality — do not append them to every single line.
-7. Never leave ${appConfig.sourceLanguage} words untranslated unless they are a deliberate on-screen element (a sign, a brand, a song title).
-8. Do not add explanations, transliterations, speaker labels or commentary. Output only the translations.
-9. Escape nothing: emit plain ${appConfig.targetLanguage} text. Do not include ASS/SRT markup.
+2. Subtitles are read at a glance. Translate for the ear of a ${appConfig.targetLanguage} viewer watching in real time: concise, idiomatic, and no more verbose than the source.
+3. Honour speaker intent — sarcasm, teasing, anger, formal register and foreign-accented speech should survive the translation.
+4. Keep established glossary renderings. Keep a character's register consistent across cues.
+5. Match the speaker's gender with natural particles: male speakers may use ครับ/อะ/นะ; female speakers may use ค่ะ/นะ/สิ. Use ครับ or ค่ะ only where the ${appConfig.sourceLanguage} original justifies the formality — do not append them to every single line.
+6. Never leave ${appConfig.sourceLanguage} words untranslated unless they are a deliberate on-screen element (a sign, a brand, a song title).
+7. Do not add explanations, transliterations, speaker labels or commentary. Output only the translations.
+8. Escape nothing: emit plain ${appConfig.targetLanguage} text. Do not include ASS/SRT markup.
+
+${lineBreakRule()}
 ${contextBlock(appConfig.additionalContext)}`;
 }
 
@@ -177,6 +190,8 @@ RULES
 6. Leave cues that are already correct exactly as they are. Do not "improve" wording that is merely different.
 7. Never invent content that is not supported by the original cue.
 8. Output only the corrected ${appConfig.targetLanguage} texts, with no markup or commentary.
+
+${lineBreakRule()}
 ${contextBlock(appConfig.additionalContext)}`;
 }
 
@@ -212,6 +227,8 @@ RULES
 8. Keep it short enough to read on screen. If a cue is needlessly long, tighten it without losing meaning.
 9. Leave deliberate on-screen text (signs, brands, song titles) alone.
 10. Output only the ${appConfig.targetLanguage} text, with no markup or commentary.
+
+${lineBreakRule()}
 ${contextBlock(appConfig.additionalContext)}`;
 }
 

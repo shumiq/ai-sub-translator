@@ -48,6 +48,15 @@ export const appConfig = {
     emptyText: true,
     isThai: true,
     leftoverSource: true,
+    /**
+     * Off by default. When on, a mismatched cue is fatal rather than
+     * advisory: it is rejected, retried, bisected, and ultimately aborts the
+     * file if it cannot be made to fit. That is the right call only if you
+     * want the source's break points preserved exactly, because a cue the
+     * model cannot re-break to spec takes the whole file down with it
+     * (invariant 3). Off, the prompt lets the model re-break for Thai and
+     * asks for at most two lines.
+     */
     lineCountPerCue: false,
   } as ValidationConfig,
 

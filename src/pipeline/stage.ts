@@ -93,9 +93,10 @@ export interface StageOptions {
 /**
  * Runs one AI pass over a list of cues.
  *
- * A chunk that fails validation is retried with the validator's message fed
- * back to the model; once retries are exhausted the chunk is bisected and each
- * half is retried, so one stubborn cue can never block the whole file.
+ * The range is walked one `chunkSize` chunk at a time. A chunk that fails
+ * validation is retried with the validator's message fed back to the model;
+ * once retries are exhausted the chunk is bisected and each half is retried, so
+ * one stubborn cue can never block the whole file.
  */
 export async function runTextStage(
   client: AiClient,
@@ -143,14 +144,12 @@ export async function runTextStage(
     return toTextArray(extractJson(response));
   };
 
-  const processRange = async (
+  const processChunk = async (
     from: number,
     to: number,
     initialFeedback: string | null,
   ): Promise<string[]> => {
-    if (from >= to) return [];
-
-    const size = Math.min(chunkSize, to - from);
+    const size = to - from;
     let feedback = initialFeedback;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -165,19 +164,18 @@ export async function runTextStage(
         continue;
       }
 
-      const { error, warnings } = validateChunk(
-        source.slice(from, from + size),
+      const error = validateChunk(
+        source.slice(from, to),
         texts,
-        `${stage} cues ${from + 1}-${from + size}`,
+        `${stage} cues ${from + 1}-${to}`,
       );
       if (!error) {
-        for (const warning of warnings) Logger.debug(`  warn: ${warning}`);
         completed += size;
         onProgress?.(completed, source.length);
         return texts;
       }
 
-      Logger.debug(`  cues ${from + 1}-${from + size} rejected: ${error}`);
+      Logger.debug(`  cues ${from + 1}-${to} rejected: ${error}`);
       feedback = error;
     }
 
@@ -188,13 +186,34 @@ export async function runTextStage(
     }
 
     Logger.debug(
-      `  splitting cues ${from + 1}-${from + size} after repeated validation failures`,
+      `  splitting cues ${from + 1}-${to} after repeated validation failures`,
     );
     const middle = from + Math.floor(size / 2);
-    const left = await processRange(from, middle, feedback);
-    const right = await processRange(middle, to, feedback);
+    const left = await processChunk(from, middle, feedback);
+    const right = await processChunk(middle, to, feedback);
     return [...left, ...right];
   };
 
-  return processRange(0, source.length, null);
+  const processRange = async (from: number, to: number): Promise<string[]> => {
+    const texts: string[] = [];
+    for (let start = from; start < to; start += chunkSize) {
+      const end = Math.min(start + chunkSize, to);
+      // Each chunk starts clean: whatever went wrong in the previous chunk
+      // says nothing about this one.
+      texts.push(...(await processChunk(start, end, null)));
+    }
+    return texts;
+  };
+
+  const texts = await processRange(0, source.length);
+
+  // Belt and braces. Every cue must have come back, otherwise `applyTexts`
+  // would write empty cues for the tail of the file and nothing would notice.
+  if (texts.length !== source.length) {
+    throw new AiResponseError(
+      `Stage "${stage}" returned ${texts.length} texts for ${source.length} cues.`,
+    );
+  }
+
+  return texts;
 }

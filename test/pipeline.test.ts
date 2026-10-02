@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appConfig } from "../config";
 import type { AiClient } from "../src/ai/client";
+import { checkCues, inspectLine } from "../src/badchars";
 import { runPipeline } from "../src/pipeline";
 import { extractJson, toTextArray } from "../src/pipeline/stage";
 import { parseSrt } from "../src/subtitle/srt";
@@ -42,13 +43,15 @@ const inputIds = (prompt: string) =>
 
 function stubClient(handler: (prompt: string, call: number) => string) {
   const prompts: string[] = [];
+  const systems: string[] = [];
   const client = {
-    async generate(request: { prompt: string }) {
+    async generate(request: { system: string; prompt: string }) {
+      systems.push(request.system);
       prompts.push(request.prompt);
       return handler(request.prompt, prompts.length - 1);
     },
   } as unknown as AiClient;
-  return { client, prompts };
+  return { client, prompts, systems };
 }
 
 const tempDir = mkdtempSync(join(tmpdir(), "ai-sub-test-"));
@@ -230,6 +233,168 @@ console.log("\nbisection");
   );
 }
 
+console.log("\nmulti-chunk coverage");
+// The regression that produced a file whose cues 61..1603 were empty: the
+// range walker stopped after one chunk, so only the first chunkSize cues were
+// ever translated and the rest were written out as empty cues.
+{
+  const savedChunkSize = appConfig.chunkSize;
+  appConfig.chunkSize = 2;
+  try {
+    const many = CUES.concat(
+      parseSrt(["4\n00:00:07,500 --> 00:00:09,000\nFourth line.\n\n"].join("")),
+      parseSrt(["5\n00:00:09,500 --> 00:00:11,000\nFifth line.\n\n"].join("")),
+    );
+    const { client, prompts } = stubClient((prompt) =>
+      ok(inputIds(prompt).map((cue) => `แปล${cue.id}`)),
+    );
+    const out = await runPipeline(many, {
+      client,
+      dictionary: {},
+      dictionaryPath,
+      stages: ["translation"],
+    });
+    check(
+      "every cue past the first chunk is translated",
+      out.length === 5 &&
+        out.every((cue) => cue.lines.length === 1 && cue.lines[0] !== ""),
+      out.map((cue) => cue.lines.join("")).join("|"),
+    );
+    check(
+      "the tail cue keeps its source timing",
+      out[4]!.startMs === 9500 && out[4]!.endMs === 11000,
+      `${out[4]!.startMs}-${out[4]!.endMs}`,
+    );
+    check(
+      "one request per chunk",
+      prompts.length === 3,
+      `got ${prompts.length}`,
+    );
+  } finally {
+    appConfig.chunkSize = savedChunkSize;
+  }
+}
+
+console.log("\nline count per cue");
+// CUES are all single-line, so a two-line answer is a mismatch.
+{
+  const savedLineCount = appConfig.validation.lineCountPerCue;
+  appConfig.validation.lineCountPerCue = true;
+  try {
+    const { client, prompts } = stubClient((prompt) => {
+      const retried = prompt.includes("<correction_required>");
+      return ok(
+        inputIds(prompt).map((cue) =>
+          retried ? `บรรทัดเดียว${cue.id}` : `บรรทัดแรก${cue.id}\nบรรทัดที่สอง`,
+        ),
+      );
+    });
+    const out = await runPipeline(CUES, {
+      client,
+      dictionary: {},
+      dictionaryPath,
+      stages: ["translation"],
+    });
+    check(
+      "a changed line count is rejected",
+      prompts.length === 2,
+      `got ${prompts.length}`,
+    );
+    check(
+      "the reason names the line counts",
+      prompts[1]!.includes("line count changed from 1 to 2"),
+      "feedback missing the line-count reason",
+    );
+    check(
+      "the retried answer is what lands",
+      out[0]!.lines.join("|") === "บรรทัดเดียว1",
+      out[0]!.lines.join("|"),
+    );
+  } finally {
+    appConfig.validation.lineCountPerCue = savedLineCount;
+  }
+}
+
+{
+  // A symbol-only source cue carries nothing to translate, so the model is
+  // free to answer with any number of lines.
+  const symbols = parseSrt(
+    ["1\n00:00:01,000 --> 00:00:03,000\n♪\n---\n\n"].join(""),
+  );
+  const savedLineCount = appConfig.validation.lineCountPerCue;
+  appConfig.validation.lineCountPerCue = true;
+  try {
+    const { client, prompts } = stubClient(() =>
+      ok(["♪\n---\n---\n---\n---\n---\n---"]),
+    );
+    const out = await runPipeline(symbols, {
+      client,
+      dictionary: {},
+      dictionaryPath,
+      stages: ["translation"],
+    });
+    check(
+      "symbol-only cue is exempt from the line count",
+      prompts.length === 1,
+    );
+    check("and still keeps its timing", out[0]!.startMs === 1000);
+  } finally {
+    appConfig.validation.lineCountPerCue = savedLineCount;
+  }
+}
+
+console.log("\nline break instructions follow the flag");
+// The validator and the prompt have to agree: telling the model it may re-break
+// while the validator rejects it just burns retries.
+{
+  const savedLineCount = appConfig.validation.lineCountPerCue;
+  const systemsOf = async (lineCountPerCue: boolean) => {
+    appConfig.validation.lineCountPerCue = lineCountPerCue;
+    const { client, systems } = stubClient(() => ok(["ก1", "ก2", "ก3"]));
+    await runPipeline(CUES, {
+      client,
+      dictionary: {},
+      dictionaryPath,
+      stages: ["translation", "consistency", "humanization"],
+    });
+    return systems;
+  };
+
+  try {
+    const strict = await systemsOf(true);
+    check(
+      "on: all three stages forbid re-breaking",
+      strict.length === 3 &&
+        strict.every((s) => s.includes("exactly the same number of lines")),
+      `checked ${strict.length} system prompt(s)`,
+    );
+    check(
+      "on: does not mention re-breaking",
+      strict.every((s) => !s.includes("splitting them further is fine")),
+    );
+
+    const loose = await systemsOf(false);
+    check(
+      "off: all three stages allow merging and splitting",
+      loose.length === 3 &&
+        loose.every((s) => s.includes("splitting them further is fine")),
+      `checked ${loose.length} system prompt(s)`,
+    );
+    check(
+      "off: still demands non-empty, two lines at most",
+      loose.every(
+        (s) => s.includes("never leave a cue empty") && s.includes("two lines"),
+      ),
+    );
+    check(
+      "off: does not promise an exact line count",
+      loose.every((s) => !s.includes("exactly the same number of lines")),
+    );
+  } finally {
+    appConfig.validation.lineCountPerCue = savedLineCount;
+  }
+}
+
 console.log("\nglossary extraction");
 {
   const { client } = stubClient(() =>
@@ -320,6 +485,39 @@ console.log("\nglossary injection");
 }
 
 rmSync(tempDir, { recursive: true, force: true });
+
+console.log("\noutput character checks");
+{
+  const kinds = (text: string) => inspectLine(text).map((i) => i.kind);
+  check("clean Thai line", kinds("ครับ, โอเค! (ดีมาก) 1,000").length === 0);
+  check("Thai and allowed symbols", kinds("สวัสดี — … ①②♪").length === 0);
+  check("curly quotes flagged", kinds("สวัสดี “เด็ก”").includes("badChar"));
+  check("Thai/Latin adjacency", kinds("ข้อความtext").includes("mixedScript"));
+  check("untranslated line", kinds("I said no.").includes("nonThai"));
+  check("CJK flagged", kinds("字幕คำบรรยาย").includes("badChar"));
+  check("Cyrillic flagged", kinds("Привет ครับ").includes("badChar"));
+  check("emoji flagged", kinds("โอเค 😀").includes("badChar"));
+  check("punctuation-only line ignored", kinds("-").length === 0);
+
+  const checked = checkCues(
+    parseSrt(
+      [
+        "1\n00:00:01,000 --> 00:00:03,000\nทดสอบภาษาไทย\n\n",
+        "2\n00:00:04,000 --> 00:00:06,000\n字幕\nหวัดดี\n\n",
+      ].join(""),
+    ),
+  );
+  check(
+    "issue carries cue number and timecode",
+    checked.length === 2 &&
+      checked.every((i) => i.cue === 2 && i.startMs === 4000),
+    `${checked.length} issue(s)`,
+  );
+  check(
+    "bad character reported with its code point",
+    checked.some((i) => i.kind === "badChar" && i.detail.includes("U+5B57")),
+  );
+}
 
 void appConfig;
 console.log(`\n${failures === 0 ? "ALL PASS" : `${failures} FAILURE(S)`}`);

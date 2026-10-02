@@ -38,7 +38,11 @@ export interface ValidationConfig {
   isThai: boolean;
   /** Long untranslated stretches of source-language text. */
   leftoverSource: boolean;
-  /** Report (but do not fail on) a changed line count inside a cue. */
+  /**
+   * When on, a cue must keep the source's line count — fatal, because the
+   * original timings only make sense for the break points the source file was
+   * authored with. Off by default: the prompt then lets the model re-break.
+   */
   lineCountPerCue: boolean;
 }
 

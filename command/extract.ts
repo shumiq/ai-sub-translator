@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { appConfig } from "../config";
 import { parseArgs } from "../src/cli";
@@ -42,7 +42,16 @@ function describe(stream: MediaStream, position: number) {
   return `  [${position}] #${stream.index} ${stream.codec_name} (${language})${title}`;
 }
 
-async function extractStem(video: string, stream: MediaStream) {
+interface ExtractedSubtitles {
+  srt: string;
+  /** The source's own ASS script, when the track is ASS/SSA. */
+  ass?: string;
+}
+
+async function extractStem(
+  video: string,
+  stream: MediaStream,
+): Promise<ExtractedSubtitles> {
   const stem = stemOf(video);
   const temp = join(appConfig.tempDir, stem);
   ensureDirs([appConfig.tempDir]);
@@ -59,11 +68,13 @@ async function extractStem(video: string, stream: MediaStream) {
       "ass",
       assPath,
     ]);
-    // Step 2.2 — ASS to SRT, in node.
-    const cues = assToCues(readFileSync(assPath, "utf8"));
+    // Step 2.2 — ASS to SRT, in node. The raw ASS is kept as well: SRT has
+    // nowhere to put styles, margins or `\pos`, and hardsub needs them.
+    const ass = readFileSync(assPath, "utf8");
+    const cues = assToCues(ass);
     if (cues.length === 0)
       throw new Error("No dialogue events found in the extracted ASS");
-    return stringifySrt(cues);
+    return { srt: stringifySrt(cues), ass };
   }
 
   // Everything else text-based goes straight to SRT.
@@ -80,7 +91,7 @@ async function extractStem(video: string, stream: MediaStream) {
   const cues = parseSrt(readFileSync(srtPath, "utf8"));
   if (cues.length === 0)
     throw new Error("No cues found in the extracted subtitle");
-  return stringifySrt(cues);
+  return { srt: stringifySrt(cues) };
 }
 
 async function main() {
@@ -104,15 +115,7 @@ async function main() {
   for (const video of videos) {
     const stem = stemOf(video);
     const target = join(appConfig.inputDir, `${stem}.srt`);
-
-    if (existsSync(target) && !force) {
-      Logger.info(
-        `${relative(process.cwd(), target)} already exists (use --force to overwrite)`,
-      );
-      continue;
-    }
-
-    Logger.step(`Extracting subtitles from ${stem}`);
+    const assTarget = join(appConfig.inputDir, `${stem}.ass`);
 
     const streams = (await probeStreams(video)).filter(
       (s) => s.codec_type === "subtitle",
@@ -146,15 +149,39 @@ async function main() {
       continue;
     }
 
+    // An ASS track yields two files, and both have to be current before the
+    // video counts as done — an .srt from an older run with no matching .ass
+    // would silently lose every position.
+    const needsAss = ASS_CODECS.has(chosen.codec_name);
+    if (existsSync(target) && (existsSync(assTarget) || !needsAss) && !force) {
+      Logger.info(
+        `${relative(process.cwd(), target)} already exists (use --force to overwrite)`,
+      );
+      continue;
+    }
+
+    Logger.step(`Extracting subtitles from ${stem}`);
     Logger.info(`Using subtitle stream ${position} (${chosen.codec_name})`);
 
     try {
-      const srt = await extractStem(video, chosen);
-      writeFileSync(target, srt, "utf8");
-      const cueCount = parseSrt(srt).length;
+      const extracted = await extractStem(video, chosen);
+      writeFileSync(target, extracted.srt, "utf8");
+      const cueCount = parseSrt(extracted.srt).length;
       Logger.success(
         `Wrote ${relative(process.cwd(), target)} (${cueCount} cues)`,
       );
+      if (extracted.ass !== undefined) {
+        writeFileSync(assTarget, extracted.ass, "utf8");
+        Logger.info(`Wrote ${relative(process.cwd(), assTarget)} (positions)`);
+      } else if (existsSync(assTarget)) {
+        // An earlier run pulled an ASS track. Its positions belong to a
+        // different stream, and `retextAss()` matches on timestamps, so
+        // leaving it behind risks a mismatched script reaching the burn-in.
+        unlinkSync(assTarget);
+        Logger.info(
+          `Removed ${relative(process.cwd(), assTarget)} (stale positions)`,
+        );
+      }
     } catch (error) {
       Logger.error(`${stem}: ${(error as Error).message}`);
       failures++;

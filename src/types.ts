@@ -48,8 +48,8 @@ export interface ValidationConfig {
 
 export interface HardsubStyle {
   /**
-   * ASS font family name. Mali's weights ship as separate families, so the
-   * weight must be spelled out: "Mali Medium", not "Mali".
+   * ASS font family name, as reported by the font's name table — libass
+   * falls back silently when it does not match the file in `assetDir`.
    */
   fontName: string;
   fontSize: number;

@@ -74,10 +74,11 @@ export const appConfig = {
     /** Keep the original soft subtitle tracks alongside the burned-in ones. */
     keepOriginalSubtitles: false,
     style: {
-      // "Mali Medium" is the Win32 family name of Mali-Medium.ttf. Note that
-      // plain "Mali" silently resolves to the *Regular* face instead, so the
-      // weight has to be spelled out here.
-      fontName: "Mali Medium",
+      // Must equal the family name reported by the font file's name table.
+      // libass matches `Fontname` against it and silently falls back to some
+      // other Thai face when they differ, so verify it with a font inspector
+      // after swapping the asset — no font name is named here on purpose.
+      fontName: "Sarabun",
       fontSize: 24,
       playResX: 1920,
       playResY: 1080,

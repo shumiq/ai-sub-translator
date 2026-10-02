@@ -1,0 +1,25 @@
+{
+  "name": "ai-sub-translator",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "extract": "bun command/extract.ts",
+    "translate": "bun command/translate.ts",
+    "hardsub": "bun command/hardsub.ts",
+    "test": "bun test/pipeline.test.ts",
+    "typecheck": "tsc --noEmit",
+    "check": "bun run typecheck && bun run test"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@google/genai": "^2.26.0",
+    "ass-parser": "^0.2.0",
+    "ass-stringify": "^0.1.3"
+  }
+}

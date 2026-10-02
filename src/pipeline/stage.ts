@@ -1,0 +1,200 @@
+﻿import { appConfig } from "../../config";
+import type { AiClient } from "../ai/client";
+import { AiResponseError } from "../ai/errors";
+import { Logger } from "../logger";
+import {
+  stagePrompt,
+  stageSystem,
+  TEXTS_RESPONSE_SCHEMA,
+  type StagePromptInput,
+} from "../prompts";
+import { validateChunk } from "../validate";
+import type { Cue, DictionaryEntry, PipelineStage } from "../types";
+
+/**
+ * Pulls the first JSON payload out of a model response. Constrained decoding
+ * normally returns raw JSON, but a stray code fence or preamble should not
+ * cost a whole chunk.
+ */
+export function extractJson(text: string): unknown {
+  const withoutFences = text
+    .replace(/^```(?:json)?/i, "")
+    .replace(/```\s*$/, "")
+    .trim();
+
+  const objectStart = withoutFences.indexOf("{");
+  const arrayStart = withoutFences.indexOf("[");
+  const start =
+    objectStart === -1
+      ? arrayStart
+      : arrayStart === -1
+        ? objectStart
+        : Math.min(objectStart, arrayStart);
+  const end = Math.max(
+    withoutFences.lastIndexOf("}"),
+    withoutFences.lastIndexOf("]"),
+  );
+
+  if (start === -1 || end <= start) {
+    throw new AiResponseError("Response contained no JSON payload");
+  }
+
+  try {
+    return JSON.parse(withoutFences.slice(start, end + 1));
+  } catch (error) {
+    throw new AiResponseError(
+      `Response was not valid JSON: ${(error as Error).message}`,
+    );
+  }
+}
+
+/** Accepts `["a","b"]` as well as `{"texts":["a","b"]}` from the model. */
+export function toTextArray(value: unknown): string[] {
+  const list = Array.isArray(value)
+    ? value
+    : value &&
+        typeof value === "object" &&
+        Array.isArray((value as Record<string, unknown>).texts)
+      ? ((value as Record<string, unknown>).texts as unknown[])
+      : null;
+
+  if (!list) {
+    throw new AiResponseError("Expected an array of strings under `texts`");
+  }
+
+  return list.map((item) => {
+    if (typeof item === "string") return item;
+    if (item && typeof item === "object") {
+      const nested = (item as Record<string, unknown>).text;
+      if (typeof nested === "string") return nested;
+    }
+    throw new AiResponseError("Expected an array of strings under `texts`");
+  });
+}
+
+export interface StageOptions {
+  stage: PipelineStage;
+  /** Cues this stage rewrites. For review stages this holds the ${original}. */
+  source: Cue[];
+  /** Text under revision, aligned 1:1 with `source`. */
+  current?: Cue[];
+  /**
+   * Cues fed in as continuity context. Defaults to `current`, which is what
+   * review stages want; translation passes the source so the model can still
+   * see the surrounding scene while it is still writing in the source language.
+   */
+  context?: Cue[];
+  chunkSize?: number;
+  previousCueCount?: number;
+  glossary?: Record<string, DictionaryEntry>;
+  onProgress?: (done: number, total: number) => void;
+}
+
+/**
+ * Runs one AI pass over a list of cues.
+ *
+ * A chunk that fails validation is retried with the validator's message fed
+ * back to the model; once retries are exhausted the chunk is bisected and each
+ * half is retried, so one stubborn cue can never block the whole file.
+ */
+export async function runTextStage(
+  client: AiClient,
+  options: StageOptions,
+): Promise<string[]> {
+  const {
+    stage,
+    source,
+    current = [],
+    chunkSize = appConfig.chunkSize,
+    previousCueCount = appConfig.previousCueCount,
+    glossary = {},
+    onProgress,
+  } = options;
+
+  const contextCues = options.context ?? current;
+
+  if (source.length === 0) return [];
+
+  const maxRetries = appConfig.validation.retriesLimit || 3;
+  const system = stageSystem(stage);
+  let completed = 0;
+
+  const request = async (
+    from: number,
+    size: number,
+    feedback: string | null,
+  ) => {
+    const chunk = source.slice(from, from + size);
+    const input: StagePromptInput = {
+      source: chunk,
+      current: current.slice(from, from + size),
+      context: contextCues.slice(Math.max(0, from - previousCueCount), from),
+      glossary,
+      feedback,
+    };
+
+    const response = await client.generate({
+      system,
+      prompt: stagePrompt(stage, input),
+      responseSchema: TEXTS_RESPONSE_SCHEMA,
+      label: `${stage} ${from + 1}-${from + size}`,
+    });
+
+    return toTextArray(extractJson(response));
+  };
+
+  const processRange = async (
+    from: number,
+    to: number,
+    initialFeedback: string | null,
+  ): Promise<string[]> => {
+    if (from >= to) return [];
+
+    const size = Math.min(chunkSize, to - from);
+    let feedback = initialFeedback;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      let texts: string[];
+      try {
+        texts = await request(from, size, feedback);
+      } catch (error) {
+        if (!(error instanceof AiResponseError)) throw error;
+        // A malformed response is worth another shot with clearer asks.
+        Logger.debug(`  malformed response: ${error.message}`);
+        feedback = `${error.message}. Return strict JSON of the form {"texts": ["...", "..."]}.`;
+        continue;
+      }
+
+      const { error, warnings } = validateChunk(
+        source.slice(from, from + size),
+        texts,
+        `${stage} cues ${from + 1}-${from + size}`,
+      );
+      if (!error) {
+        for (const warning of warnings) Logger.debug(`  warn: ${warning}`);
+        completed += size;
+        onProgress?.(completed, source.length);
+        return texts;
+      }
+
+      Logger.debug(`  cues ${from + 1}-${from + size} rejected: ${error}`);
+      feedback = error;
+    }
+
+    if (size === 1) {
+      throw new AiResponseError(
+        `Stage "${stage}" failed on cue ${source[from]!.index} after ${maxRetries + 1} attempts.`,
+      );
+    }
+
+    Logger.debug(
+      `  splitting cues ${from + 1}-${from + size} after repeated validation failures`,
+    );
+    const middle = from + Math.floor(size / 2);
+    const left = await processRange(from, middle, feedback);
+    const right = await processRange(middle, to, feedback);
+    return [...left, ...right];
+  };
+
+  return processRange(0, source.length, null);
+}

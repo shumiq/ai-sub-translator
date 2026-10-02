@@ -41,12 +41,14 @@ bun command/extract.ts
 ```
 
 Pulls the **first** subtitle stream out of every video in `input/` and writes
-`input/<name>.srt`. ASS/SSA subtitles are extracted as `.ass` and converted to
-`.srt` in Node; everything else goes straight through ffmpeg as SRT.
+`input/<name>.srt`. An ASS/SSA stream also leaves its script behind as
+`input/<name>.ass` — SRT has nowhere to put styles, margins or `\pos`, and the
+burn-in step reuses those positions. Everything else goes through ffmpeg as
+SRT and has no `.ass`.
 
 | Flag           | Effect                                      |
 | -------------- | ------------------------------------------- |
-| `--force`      | Overwrite existing `.srt` files             |
+| `--force`      | Re-extract, overwriting `.srt` and `.ass`   |
 | `--stream <n>` | Pick the n-th subtitle stream (default `0`) |
 
 Run with `DEBUG=1` to list every subtitle stream first. Bitmap subtitles
@@ -103,16 +105,30 @@ expected and harmless — the allow-list is deliberately strict.
 bun command/hardsub.ts
 ```
 
-Re-renders `output/<name>.srt` as a styled ASS script and muxes `input/<name>.mkv`
-into `output/<name>.mp4`.
+Re-renders `output/<name>.srt` as an ASS script and burns it into
+`input/<name>.mkv`, writing `output/<name>.mp4`. When `input/<name>.ass` came
+out of extract, that script is reused: `retextAss()` keeps its styles, margins
+and `\pos` overrides and only swaps in the translated text, so nothing the SRT
+format cannot hold is lost. Without it, a generated single-style script from
+`hardsub.style` is burned instead.
 
-| Flag            | Effect                                              |
-| --------------- | --------------------------------------------------- |
-| `--file <name>` | Only process one file                               |
-| `--force`       | Overwrite existing `.mp4`                           |
-| `--keep-subs`   | Also copy the original soft subtitle tracks through |
+The encode goes to a `.temp/<name>.mkv` first and is then renamed to `.mp4`:
+matroska accepts any stream layout, the rename skips a remux, and no soft
+subtitle track is carried over — the burned-in one is the only subtitle in the
+output.
 
-Encoding is `libx264 -preset slow -b:v 2M`, `aac -b:a 192k`, `+faststart`.
+Burn-in uses `ass=<script>:shaping=complex`, not the `subtitles` filter. Only
+`ass` exposes `shaping`, and the default (`auto`) picks libass's simple shaper,
+which draws Thai vowels and tone marks side by side on one level instead of
+stacking them. Complex shaping routes through HarfBuzz, so `นี้` and `เดี๋ยว`
+come out correctly.
+
+| Flag            | Effect                    |
+| --------------- | ------------------------- |
+| `--file <name>` | Only process one file     |
+| `--force`       | Overwrite existing `.mp4` |
+
+Codecs and rates come from `hardsub` in `config.ts`.
 
 ## The translation pipeline
 
@@ -160,36 +176,34 @@ in the summary.
 
 ## Configuration
 
-`config.ts` holds everything:
-
-| Key                                 | Default                    | Notes                                       |
-| ----------------------------------- | -------------------------- | ------------------------------------------- |
-| `model`                             | `gemini-flash-lite-latest` |                                             |
-| `thinking`                          | `low`                      | `off` \| `low` \| `medium` \| `high`        |
-| `temperature`                       | `0.3`                      |                                             |
-| `chunkSize`                         | `60`                       | cues per request for stages 2-4             |
-| `extractionChunkSize`               | `400`                      | cues per request for stage 1                |
-| `previousCueCount`                  | `25`                       | finalised cues sent as context              |
-| `sourceLanguage` / `targetLanguage` | `English` / `Thai`         |                                             |
-| `additionalContext`                 | `[]`                       | series-specific hints added to every prompt |
-| `validation.*`                      | see file                   | turn individual checks on or off            |
+`config.ts` holds every tunable — model, thinking level, temperature, chunk and
+context sizes, source/target languages, series hints, validation switches, retry
+backoff, and the hardsub style. Read it for the current values; they are not
+repeated here on purpose, so this file cannot drift out of date.
 
 Set `DEBUG=1` for verbose logging (per-cue progress, rejected chunks, retries).
 
 ### Subtitle styling
 
-`hardsub.style` in `config.ts` controls the ASS script: `fontName`, `fontSize`
-(24), `outline`, `shadow`, margins and colours.
+`hardsub.style` in `config.ts` is the style for a **generated** script (the
+fallback when there is no source `.ass`).
 
-`playResX` / `playResY` are set to 1920x1080. libass scales the script to the
-video, so the subtitle keeps the same _relative_ size regardless of whether the
-source is 720p or 4K.
+A source `.ass` is not rebuilt from that style — it keeps its own sizes and
+layout, with three exceptions applied to every style in `retextAss()`:
+`Fontname` is forced to `hardsub.style.fontName`, `Outline`/`Shadow` are
+unified to `hardsub.style.outline`/`shadow` (source scripts mix everything from
+0 to 3), and `Fontsize` is raised by `hardsub.inheritedFontSizeStep` since the
+source tuned its sizes for its own font.
 
-**On the font name:** Mali ships each weight as its own family, so
-`Mali-Medium.ttf` reports a Win32 family name of `"Mali Medium"` with
-subfamily `"Regular"`. A `Fontname` of plain `Mali` therefore resolves to
-**Mali-Regular**, not Medium, with no warning. The default is `"Mali Medium"` —
-change it to `"Mali SemiBold"`, `"Mali Bold"` and so on to pick another weight.
+`playResX` / `playResY` are deliberately independent of the video. libass
+scales the script, so the subtitle keeps the same _relative_ size regardless of
+whether the source is 720p or 4K.
+
+**On the font:** `hardsub.style.fontName` must equal the family name reported by
+the font's name table — check it with a font inspector after swapping the file
+in `assetDir`, because a mismatch does not error. libass silently falls back to
+some other Thai face instead. Pick a face whose tone marks sit inside normal
+line height, so stacked marks (`นี้`) never overlap the line above.
 
 ## Layout
 

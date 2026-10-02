@@ -56,9 +56,12 @@ check in `test/pipeline.test.ts`.
 4. **Dictionary entries are append-only.** `runGlossaryStage` skips keys that
    already exist. Users edit `dictionary.json` to pin wording; silently
    overwriting their choices would defeat the point.
-5. **The font name must spell out the weight.** Mali ships each weight as its
-   own family. `Fontname=Mali` resolves to **Regular**, not Medium, silently.
-   Use `"Mali Medium"`. This was verified empirically — see the README.
+5. **`Fontname` must match the bundled font's family name.** libass resolves
+   it silently and falls back to another Thai face when it does not match, so
+   `hardsub.style.fontName` in `config.ts` is the single source of truth: it is
+   written into generated scripts and forced onto every style of an inherited
+   source script in `retextAss()`. Never name a font in code or docs — change
+   the config and the bundled asset together, or the two contradict each other.
 
 ## Where things live
 
@@ -86,7 +89,7 @@ check in `test/pipeline.test.ts`.
   `src/ai/errors.ts`; never let a raw SDK error escape to the user.
 - **Paths:** run ffmpeg with `cwd: PROJECT_ROOT` (already the default in
   `runFfmpeg`) and pass _relative_ paths. Absolute Windows paths need escaping
-  in the `subtitles` filter and are a known source of breakage.
+  in the `ass` filter and are a known source of breakage.
 - **Comments:** explain _why_, especially for the invariants above. Do not
   narrate what the code does.
 
@@ -97,11 +100,20 @@ check in `test/pipeline.test.ts`.
   and is easy to miss on short clips.
 - **ASS files get a UTF-8 BOM** on write (`cuesToAss`). Some libass builds
   mis-detect Thai without it.
-- **`playResX/Y` is 1920x1080 regardless of the video.** libass scales, so this
-  keeps the subtitle the same relative size at 720p and at 4K. Changing it
-  changes apparent size.
+- **`playResX/Y` is independent of the video.** libass scales the script, so
+  the configured value keeps the subtitle the same relative size at 720p and at
+  4K. Changing it changes apparent size.
 - **Content-filter blocks are per-file, not per-request.** A `ProhibitedContentError`
   aborts the whole file; a `HighDemandError` means every key was rate-limited.
   Both are reported in the summary rather than crashing the run.
 - **bitmap subtitles cannot be extracted.** PGS/VobSub/DVB have no text form;
   `extract.ts` says so and suggests `--stream`. This is not a bug to fix.
+- **Burn-in must use `ass=…:shaping=complex`.** The `subtitles` filter has no
+  `shaping` option, and libass's default (`auto`) picks the simple shaper, which
+  puts Thai vowels and tone marks on one level instead of stacking them — every
+  stacked syllable (`นี้`, `เดี๋ยว`) renders wrong. Verified empirically: outline,
+  shadow, font size and the `Encoding` field make no difference at all (libass
+  ignores `Encoding` entirely), only the shaper does.
+- **`-ss` before `-i` makes libass draw nothing.** Fast input seeking resets the
+  timestamps the filter sees, so subtitles appear absent. Put `-ss` after `-i`
+  when test-rendering a single frame.

@@ -1,4 +1,10 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join, relative } from "node:path";
 import { appConfig } from "../config";
 import { parseArgs } from "../src/cli";
@@ -21,8 +27,6 @@ const quoted = (value: string) =>
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const force = args.flags.has("force");
-  const keepSubtitles =
-    args.flags.has("keep-subs") || appConfig.hardsub.keepOriginalSubtitles;
 
   ensureDirs([appConfig.inputDir, appConfig.outputDir, appConfig.tempDir]);
   await assertFfmpegAvailable();
@@ -55,7 +59,7 @@ async function main() {
       continue;
     }
 
-    const target = join(appConfig.outputDir, `${stem}.mp4`);
+    const target = join(PROJECT_ROOT, appConfig.outputDir, `${stem}.mp4`);
     if (existsSync(target) && !force) {
       Logger.info(
         `${relative(PROJECT_ROOT, target)} already exists (use --force to overwrite)`,
@@ -105,10 +109,11 @@ async function main() {
 
     const streams = await probeStreams(video);
     const hasAudio = streams.some((stream) => stream.codec_type === "audio");
-    const hasSubtitles = streams.some(
-      (stream) => stream.codec_type === "subtitle",
-    );
 
+    // Matroska first, then a plain rename to .mp4: the mp4 muxer rejects some
+    // stream layouts while mkv takes anything, and the rename skips a remux.
+    // Soft subtitle tracks are never mapped — only the burned-in one remains.
+    const encodedRelative = `${appConfig.tempDir}/${stem}.mkv`;
     const ffmpegArgs: string[] = [
       "-i",
       video,
@@ -118,11 +123,14 @@ async function main() {
       "0:v:0",
     ];
     if (hasAudio) ffmpegArgs.push("-map", "0:a");
-    if (keepSubtitles && hasSubtitles) ffmpegArgs.push("-map", "0:s");
 
     ffmpegArgs.push(
       "-vf",
-      `subtitles=${quoted(assRelative)}:fontsdir=${quoted(appConfig.assetDir)}`,
+      // `ass`, not `subtitles`: only the `ass` filter exposes `shaping`, and
+      // the default (`auto`) picks the simple shaper, which draws Thai tone
+      // marks and vowels at one level instead of stacking them. Thai needs
+      // complex (HarfBuzz) shaping.
+      `ass=${quoted(assRelative)}:fontsdir=${quoted(appConfig.assetDir)}:shaping=complex`,
       "-c:v",
       "libx264",
       "-preset",
@@ -141,7 +149,7 @@ async function main() {
       ffmpegArgs.push("-c:a", "aac", "-b:a", appConfig.hardsub.audioBitrate);
     }
 
-    ffmpegArgs.push("-movflags", "+faststart", target);
+    ffmpegArgs.push(encodedRelative);
 
     Logger.info(
       `${appConfig.hardsub.style.fontName} · ${appConfig.hardsub.preset} · ` +
@@ -150,6 +158,8 @@ async function main() {
 
     try {
       await runFfmpeg(ffmpegArgs, { stream: true });
+      if (existsSync(target)) unlinkSync(target);
+      renameSync(join(PROJECT_ROOT, encodedRelative), target);
       Logger.success(`Wrote ${relative(PROJECT_ROOT, target)}`);
       built++;
     } catch (error) {

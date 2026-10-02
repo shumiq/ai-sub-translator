@@ -78,8 +78,6 @@ export const appConfig = {
      * units, because the source tuned sizes for its own font.
      */
     inheritedFontSizeStep: 4,
-    /** Keep the original soft subtitle tracks alongside the burned-in ones. */
-    keepOriginalSubtitles: false,
     style: {
       // Must equal the family name reported by the font file's name table.
       // libass matches `Fontname` against it and silently falls back to some

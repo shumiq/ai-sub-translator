@@ -71,6 +71,13 @@ export const appConfig = {
     videoBufSize: "4M",
     audioBitrate: "192k",
     preset: "slow",
+    /**
+     * Styles a source ASS script contributes are inherited as-is, except for
+     * this: every style gets `style.outline` / `style.shadow` (source scripts
+     * mix everything from 0 to 3) and its size raised by this many script
+     * units, because the source tuned sizes for its own font.
+     */
+    inheritedFontSizeStep: 4,
     /** Keep the original soft subtitle tracks alongside the burned-in ones. */
     keepOriginalSubtitles: false,
     style: {

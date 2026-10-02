@@ -1,5 +1,10 @@
 import type { Cue } from "../types";
-import { parseAss, stringifyAss, type AssSection } from "../vendor";
+import {
+  parseAss,
+  stringifyAss,
+  type AssDescriptor,
+  type AssSection,
+} from "../vendor";
 import { stripInlineTags } from "./srt";
 
 const ASS_TIMING = /^(\d+):(\d{2}):(\d{2})[.,](\d{1,3})$/;
@@ -205,6 +210,118 @@ export function cuesToAss(cues: Cue[], options: AssBuildOptions): string {
       ],
     },
   ];
+
+  return `\uFEFF${stringifyAss(sections)}`;
+}
+
+/** Inline blocks that place a line on screen rather than merely style it. */
+const LAYOUT_TAG =
+  /\\(?:pos\b|move\b|an\d|org\b|q\d|fscx|fscy|frz\b|fax\b|fay\b)/;
+
+/**
+ * The positioning overrides worth carrying over from a source line: `\pos`,
+ * `\an`, `\q` and friends say *where* the line goes, which is exactly the
+ * information SRT throws away. Font overrides are dropped — the burn-in font
+ * is chosen once, in config, not per sign.
+ */
+function positionPrefix(sourceText: string): string {
+  const blocks = sourceText.match(/\{\\[^}]*\}/g) ?? [];
+  return blocks
+    .filter((block) => LAYOUT_TAG.test(block))
+    .map((block) => block.replace(/\\fn[^\\}]*/g, ""))
+    .join("");
+}
+
+export interface RetextOptions {
+  /**
+   * Family forced onto every style. The source script's fonts are whatever
+   * the typesetter happened to have installed; the burn-in font is ours.
+   */
+  fontName: string;
+  /** Outline and shadow applied to every style — sources mix 0 to 3. */
+  outline: number;
+  shadow: number;
+  /** Added to every style's size, in the source script's own units. */
+  fontSizeStep: number;
+}
+
+/**
+ * Rebuilds an original ASS script with translated cue text: same script info,
+ * same styles, same events — only the words change. Returns `null` when the
+ * cues cannot be matched 1:1 onto the script's dialogue lines, so the caller
+ * can fall back to a freshly generated script instead of guessing.
+ *
+ * Matching is by timestamp because that is the one thing the pipeline never
+ * lets the model touch (invariant 1): every cue's `startMs` came from this
+ * very script.
+ */
+export function retextAss(
+  original: string,
+  cues: Cue[],
+  options: RetextOptions,
+): string | null {
+  const sections: AssSection[] = parseAss(original.replace(/^\uFEFF/, ""));
+
+  for (const section of sections) {
+    for (const descriptor of section.body) {
+      if (!/^style$/i.test(descriptor.key)) continue;
+      if (typeof descriptor.value !== "object" || descriptor.value === null)
+        continue;
+      const fields = descriptor.value as Record<string, string>;
+      fields.Fontname = options.fontName;
+      fields.Outline = String(options.outline);
+      fields.Shadow = String(options.shadow);
+      const size = Number(fields.Fontsize);
+      if (Number.isFinite(size)) {
+        fields.Fontsize = String(Math.round(size + options.fontSizeStep));
+      }
+    }
+  }
+
+  const events = sections.find((section) => /^events$/i.test(section.section));
+  if (!events) return null;
+
+  interface Row {
+    descriptor: AssDescriptor;
+    endMs: number;
+    text: string;
+  }
+  const byStart = new Map<number, Row[]>();
+
+  for (const descriptor of events.body) {
+    if (!/^dialogue$/i.test(descriptor.key)) continue;
+    if (typeof descriptor.value !== "object" || descriptor.value === null)
+      continue;
+    const fields = descriptor.value as Record<string, string>;
+    const startMs = assTimeToMs(fields.Start ?? "");
+    const endMs = assTimeToMs(fields.End ?? "");
+    if (Number.isNaN(startMs) || Number.isNaN(endMs)) continue;
+    const row: Row = { descriptor, endMs, text: fields.Text ?? "" };
+    const bucket = byStart.get(startMs);
+    if (bucket) bucket.push(row);
+    else byStart.set(startMs, [row]);
+  }
+
+  const used = new Set<AssDescriptor>();
+  for (const cue of cues) {
+    const bucket = byStart.get(cue.startMs);
+    if (!bucket) return null;
+    // Several events can share a start (stacked signs); prefer the exact end,
+    // then take the next unused one in file order.
+    const row =
+      bucket.find((r) => !used.has(r.descriptor) && r.endMs === cue.endMs) ??
+      bucket.find((r) => !used.has(r.descriptor));
+    if (!row) return null;
+    used.add(row.descriptor);
+    (row.descriptor.value as Record<string, string>).Text =
+      positionPrefix(row.text) + cue.lines.join("\\N");
+  }
+
+  // Dialogue lines the translated SRT never carried (blank once tags are
+  // stripped) would otherwise burn the untranslated source text.
+  events.body = events.body.filter(
+    (descriptor) => !/^dialogue$/i.test(descriptor.key) || used.has(descriptor),
+  );
 
   return `\uFEFF${stringifyAss(sections)}`;
 }

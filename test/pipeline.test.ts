@@ -14,7 +14,9 @@ import type { AiClient } from "../src/ai/client";
 import { checkCues, inspectLine } from "../src/badchars";
 import { runPipeline } from "../src/pipeline";
 import { extractJson, toTextArray } from "../src/pipeline/stage";
+import { retextAss } from "../src/subtitle/ass";
 import { parseSrt } from "../src/subtitle/srt";
+import { parseAss } from "../src/vendor";
 
 let failures = 0;
 const check = (name: string, passed: boolean, detail = "") => {
@@ -485,6 +487,99 @@ console.log("\nglossary injection");
 }
 
 rmSync(tempDir, { recursive: true, force: true });
+
+console.log("\nretextAss (inherited burn-in script)");
+{
+  const fixture = [
+    "[Script Info]",
+    "Title: fixture",
+    "ScriptType: v4.00+",
+    "PlayResX: 640",
+    "PlayResY: 360",
+    "",
+    "[V4+ Styles]",
+    "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+    "Style: Default,Impact,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0.3,2,10,10,10,1",
+    "Style: Sign,Mali,40,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,3,1,8,10,10,10,1",
+    "",
+    "[Events]",
+    "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+    "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,{\\an8\\pos(100,50)\\fnImpact}Hello there.",
+    "Dialogue: 0,0:00:01.00,0:00:02.00,Sign,,0,0,0,,{\\pos(10,10)}Stacked sign",
+    "Dialogue: 0,0:00:05.00,0:00:07.00,Default,,0,0,0,,Leftover source line",
+  ].join("\n");
+
+  // Two cues share a start (stacked signs): the exact-end match must win.
+  const cues = [
+    { index: 1, startMs: 1000, endMs: 2000, lines: ["แปลเครื่องหมาย"] },
+    { index: 2, startMs: 1000, endMs: 3000, lines: ["แปลบทสนทนา"] },
+  ];
+  // The expected face comes from config, never a literal: swapping the bundled
+  // font must not require touching this file (invariant 5).
+  const burnInFont = appConfig.hardsub.style.fontName;
+  const options = {
+    fontName: burnInFont,
+    outline: appConfig.hardsub.style.outline,
+    shadow: appConfig.hardsub.style.shadow,
+    fontSizeStep: appConfig.hardsub.inheritedFontSizeStep,
+  };
+  const result = retextAss(fixture, cues, options);
+  check("cues matched onto the script", result !== null);
+
+  if (result) {
+    const styles = Object.fromEntries(
+      parseAss(result.replace(/^﻿/, ""))
+        .find((section) => /^v4\+ styles$/i.test(section.section))!
+        .body.filter((descriptor) => /^style$/i.test(descriptor.key))
+        .map((descriptor) => {
+          const value = descriptor.value as Record<string, string>;
+          return [value.Name, value];
+        }),
+    );
+    const def = styles.Default;
+    const sign = styles.Sign;
+    check(
+      "font retargeted to the burn-in face",
+      def?.Fontname === "Sarabun" && sign?.Fontname === "Sarabun",
+      `${def?.Fontname}/${sign?.Fontname}`,
+    );
+    check(
+      "outline and shadow unified",
+      def?.Outline === String(options.outline) &&
+        def?.Shadow === String(options.shadow) &&
+        sign?.Outline === String(options.outline) &&
+        sign?.Shadow === String(options.shadow),
+      `${def?.Outline}/${def?.Shadow} ${sign?.Outline}/${sign?.Shadow}`,
+    );
+    check(
+      "sizes raised by the configured step",
+      def?.Fontsize === String(20 + options.fontSizeStep) &&
+        sign?.Fontsize === String(40 + options.fontSizeStep),
+      `${def?.Fontsize}/${sign?.Fontsize}`,
+    );
+    check(
+      "layout tags kept, font overrides dropped",
+      result.includes("{\\an8\\pos(100,50)}แปลบทสนทนา") &&
+        result.includes("{\\pos(10,10)}แปลเครื่องหมาย") &&
+        !result.includes("\\fn"),
+      "position prefix",
+    );
+    check(
+      "dialogue without a cue is dropped",
+      !result.includes("Leftover source line"),
+    );
+    check("BOM preserved for libass", result.charCodeAt(0) === 0xfeff);
+  }
+
+  check(
+    "unmatched cue falls back instead of guessing",
+    retextAss(
+      fixture,
+      [...cues, { index: 3, startMs: 9999, endMs: 10999, lines: ["x"] }],
+      options,
+    ) === null,
+  );
+}
 
 console.log("\noutput character checks");
 {

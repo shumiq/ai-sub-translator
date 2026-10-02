@@ -4,7 +4,7 @@ import { appConfig } from "../config";
 import { parseArgs } from "../src/cli";
 import { assertFfmpegAvailable, probeStreams, runFfmpeg } from "../src/ffmpeg";
 import { Logger } from "../src/logger";
-import { cuesToAss } from "../src/subtitle/ass";
+import { cuesToAss, retextAss } from "../src/subtitle/ass";
 import { parseSrt } from "../src/subtitle/srt";
 import {
   ensureDirs,
@@ -74,13 +74,33 @@ async function main() {
       continue;
     }
 
-    // Render the reviewed SRT as a single-style ASS script so libass can
-    // burn it in with the bundled Thai typeface.
+    // The original ASS script knows where every line sits — styles, margins,
+    // `\pos` overrides. Reuse it with the translated text so SRT's loss of
+    // that information never reaches the burn-in; only files extracted from a
+    // non-ASS track have no original, and those get a generated script.
     const assRelative = `${appConfig.tempDir}/${stem}.ass`;
-    const ass = cuesToAss(cues, {
-      title: stem,
-      style: appConfig.hardsub.style,
-    });
+    const originalAss = join(PROJECT_ROOT, appConfig.inputDir, `${stem}.ass`);
+    let ass: string | null = null;
+    if (existsSync(originalAss)) {
+      const s = appConfig.hardsub.style;
+      ass = retextAss(readFileSync(originalAss, "utf8"), cues, {
+        fontName: s.fontName,
+        outline: s.outline,
+        shadow: s.shadow,
+        fontSizeStep: appConfig.hardsub.inheritedFontSizeStep,
+      });
+      if (ass === null) {
+        Logger.warn(
+          `${stem}: ${relative(PROJECT_ROOT, originalAss)} does not line up with the translated cues, using the default style`,
+        );
+      }
+    }
+    if (ass === null) {
+      ass = cuesToAss(cues, {
+        title: stem,
+        style: appConfig.hardsub.style,
+      });
+    }
     writeFileSync(join(PROJECT_ROOT, assRelative), ass, "utf8");
 
     const streams = await probeStreams(video);
@@ -124,7 +144,7 @@ async function main() {
     ffmpegArgs.push("-movflags", "+faststart", target);
 
     Logger.info(
-      `Mali ${appConfig.hardsub.style.fontSize}px · ${appConfig.hardsub.preset} · ` +
+      `${appConfig.hardsub.style.fontName} · ${appConfig.hardsub.preset} · ` +
         `${appConfig.hardsub.videoBitrate} video · ${appConfig.hardsub.audioBitrate} audio`,
     );
 

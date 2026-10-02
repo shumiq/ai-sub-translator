@@ -76,7 +76,28 @@ point of the whole tool — the model gets you 90% of the way, you do the rest.
 Editing `dictionary.json` to pin a translation makes later runs consistent
 with your choices.
 
-### 5. Burn in
+### 5. Check for bad characters
+
+```bash
+bun command/validate.ts
+```
+
+Prints every line in `output/*.srt` that is likely wrong, for you to fix by
+hand: characters outside Thai/Latin (leftover CJK or Cyrillic, emoji,
+typographic quotes), Thai butted directly against Latin without a space, and
+lines with no Thai at all. Both the allow-list and the report shape are taken
+from [ai-novel-translator](https://github.com/shumiq/ai-novel-translator)'s
+`utils/validate.ts` (`BAD_CHAR_RE` and `checkBadCharacters`); its
+`tools/check_bad_characters.ts` is only the CLI wrapper around them. Like that
+tool, this prints one warning per line with its code points and the offending
+text underneath, and exits non-zero if anything was found. False positives are
+expected and harmless — the allow-list is deliberately strict.
+
+| Flag            | Effect                             |
+| --------------- | ---------------------------------- |
+| `--file <name>` | Only check one file (stem or name) |
+
+### 6. Burn in
 
 ```bash
 bun command/hardsub.ts
@@ -173,9 +194,9 @@ change it to `"Mali SemiBold"`, `"Mali Bold"` and so on to pick another weight.
 ## Layout
 
 ```
-command/     extract.ts, translate.ts, hardsub.ts
+command/     extract.ts, translate.ts, validate.ts, hardsub.ts
 config.ts    all tunables
-dictionary.json   shared glossary (safe to edit, keep it in version control)
+dictionary.json   shared glossary (git-ignored; safe to edit in place)
 test/        pipeline regression tests
 src/
   ai/        Gemini client, key rotation, typed errors
@@ -184,6 +205,7 @@ src/
   dictionary.ts  glossary load/save/filtering
   prompts.ts     per-stage system instructions
   validate.ts    chunk validation
+  badchars.ts    bad-character check for finished .srt files
   lang.ts        script detection
 ```
 

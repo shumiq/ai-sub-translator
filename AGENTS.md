@@ -28,8 +28,9 @@ source is already prettier-clean, so `bun run format` should be a no-op. If it
 produces a diff on files you did not touch, the defaults drifted; fix that in a
 dedicated commit rather than mixing it into a feature change.
 
-The three pipeline entry points are `command/extract.ts`,
-`command/translate.ts` and `command/hardsub.ts`. Run them from the project
+The pipeline entry points are `command/extract.ts`,
+`command/translate.ts`, `command/hardsub.ts`, plus `command/validate.ts` for
+post-hoc checks on finished `output/*.srt` files. Run them from the project
 root (`bun command/extract.ts`); they resolve `PROJECT_ROOT` themselves, so
 cwd does not actually matter, but relative paths in logs assume the root.
 
@@ -44,7 +45,11 @@ check in `test/pipeline.test.ts`.
 2. **One cue in, one cue out.** Cues are exchanged as JSON
    (`{"id":…, "text":…}`) against a `responseSchema`, never as free text with
    line counting. Do not "simplify" this back to counting lines — that was the
-   upstream project's approach and it is why subtitles break.
+   upstream project's approach and it is why subtitles break. This holds across
+   the _whole_ range: `processRange` walks it one `chunkSize` chunk at a time
+   and `runTextStage` throws if it did not get one text back per cue. A stage
+   that translated only its first chunk once shipped a file with cues 61..1603
+   blank, so keep the count assertion even if it looks redundant.
 3. **A file is never written lossy.** If a cue cannot be translated after
    retries, `runTextStage` throws and the file is abandoned. Do not add a
    fallback that fills a failed cue with the source text.
@@ -67,6 +72,7 @@ check in `test/pipeline.test.ts`.
 | Stage orchestration                 | `src/pipeline/index.ts`    |
 | Prompt text                         | `src/prompts.ts`           |
 | Chunk validation                    | `src/validate.ts`          |
+| Bad-character check for output      | `src/badchars.ts`          |
 | SRT read/write                      | `src/subtitle/srt.ts`      |
 | ASS read/write                      | `src/subtitle/ass.ts`      |
 | ffmpeg/ffprobe wrappers             | `src/ffmpeg.ts`            |

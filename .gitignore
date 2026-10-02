@@ -39,3 +39,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # user media
 input/
 output/
+
+# machine-written by the glossary stage; pin wording by editing it in place
+# rather than by committing it
+dictionary.json

@@ -1,0 +1,8 @@
+# Written by `saveDictionary`, not by us — reformatting it fights the
+# pipeline, which rewrites the whole file with `JSON.stringify(_, null, 2)`.
+dictionary.json
+
+# Generated media and subtitle artefacts.
+input/
+output/
+.temp/

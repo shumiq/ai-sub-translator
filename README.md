@@ -2,7 +2,7 @@
 
 Translate soft subtitles from videos in `input/` into Thai, then burn them in.
 
-Four commands, run in order. Every intermediate file is yours to inspect, and
+Three commands, run in order. Every intermediate file is yours to inspect, and
 you are expected to edit the translation before the final step.
 
 ## Setup
@@ -202,4 +202,5 @@ src/
 bun run typecheck   # tsc --noEmit
 bun run test        # pipeline regression tests, no network or API key needed
 bun run check       # both
+bun run format      # prettier --write .
 ```

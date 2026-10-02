@@ -20,7 +20,13 @@ Guidance for coding agents working in this repository.
 bun run typecheck   # tsc --noEmit — must be clean
 bun run test        # pipeline regression tests, no network / API key required
 bun run check       # both, run before finishing any change
+bun run format      # prettier --write .
 ```
+
+Formatting is prettier with stock defaults and no config file — the committed
+source is already prettier-clean, so `bun run format` should be a no-op. If it
+produces a diff on files you did not touch, the defaults drifted; fix that in a
+dedicated commit rather than mixing it into a feature change.
 
 The three pipeline entry points are `command/extract.ts`,
 `command/translate.ts` and `command/hardsub.ts`. Run them from the project

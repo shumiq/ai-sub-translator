@@ -7,7 +7,8 @@
     "test": "bun test/pipeline.test.ts",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",
-    "check": "bun run typecheck && bun run test"
+    "check": "bun run typecheck && bun run test",
+    "commit": "opencode run --auto --message \"Stage and commit current changes. Review docs (.md) for updates. Check for bugs or mistakes. Split into multiple commits if logical groups differ.\""
   },
   "devDependencies": {
     "@types/bun": "latest",

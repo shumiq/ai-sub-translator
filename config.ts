@@ -11,6 +11,13 @@ export const appConfig = {
   tempDir: ".temp",
   dictionaryPath: "dictionary.json",
 
+  /**
+   * Which subtitle stream `extract.ts` pulls, counted over the subtitle
+   * streams only. `bun command/list.ts` prints the candidates; `--stream <n>`
+   * overrides it for a single run.
+   */
+  subtitleStream: 0,
+
   model: "gemini-flash-lite-latest",
   /** Comma-separated `GEMINI_API_KEY` values; rotated on rate limits. */
   apiKeys: (process.env.GEMINI_API_KEY ?? "")

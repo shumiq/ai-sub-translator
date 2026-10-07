@@ -12,35 +12,9 @@ import { Logger } from "../src/logger";
 import { ensureDirs, listVideos, stemOf } from "../src/paths";
 import { assToCues } from "../src/subtitle/ass";
 import { parseSrt, stringifySrt } from "../src/subtitle/srt";
-
-/** Subtitle codecs ffmpeg can hand back as text. */
-const TEXT_CODECS = new Set([
-  "ass",
-  "ssa",
-  "subrip",
-  "webvtt",
-  "mov_text",
-  "text",
-  "sami",
-  "microdvd",
-  "mpsub",
-  "subviewer",
-  "realtext",
-  "stl",
-  "ttml",
-  "hdmv_text_subtitle",
-  "eia_608",
-  "eia_708",
-  "dvb_teletext",
-]);
+import { describeStream, TEXT_CODECS } from "../src/streams";
 
 const ASS_CODECS = new Set(["ass", "ssa"]);
-
-function describe(stream: MediaStream, position: number) {
-  const language = stream.tags?.language ?? "und";
-  const title = stream.tags?.title ? ` "${stream.tags.title}"` : "";
-  return `  [${position}] #${stream.index} ${stream.codec_name} (${language})${title}`;
-}
 
 interface ExtractedSubtitles {
   srt: string;
@@ -127,14 +101,17 @@ async function main() {
     }
 
     streams.forEach((stream, position) =>
-      Logger.debug(describe(stream, position)),
+      Logger.debug(describeStream(stream, position)),
     );
 
-    const position = requested === undefined ? 0 : Number(requested);
+    const position =
+      requested === undefined ? appConfig.subtitleStream : Number(requested);
     const chosen = streams[position];
     if (!chosen) {
       Logger.error(
-        `${stem}: --stream ${requested} is out of range (0-${streams.length - 1})`,
+        `${stem}: subtitle stream ${requested ?? appConfig.subtitleStream} ` +
+          `(${requested === undefined ? "config.ts subtitleStream" : "--stream"}) ` +
+          `is out of range (0-${streams.length - 1}) — see \`bun command/list.ts\``,
       );
       failures++;
       continue;
@@ -143,7 +120,8 @@ async function main() {
     if (!TEXT_CODECS.has(chosen.codec_name)) {
       Logger.error(
         `${stem}: subtitle #${position} (${chosen.codec_name}) is a bitmap format and cannot be converted to text. ` +
-          "Re-encode the video with a text subtitle track, or pick another stream with --stream.",
+          "Re-encode the video with a text subtitle track, or choose a text stream " +
+          "with `subtitleStream` in config.ts / --stream (`bun command/list.ts` shows them).",
       );
       failures++;
       continue;

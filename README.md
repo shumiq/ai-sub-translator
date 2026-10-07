@@ -37,23 +37,26 @@ cp some-episode.mkv input/
 ### 2. Extract the subtitles
 
 ```bash
+bun command/list.ts
 bun command/extract.ts
 ```
 
-Pulls the **first** subtitle stream out of every video in `input/` and writes
-`input/<name>.srt`. An ASS/SSA stream also leaves its script behind as
+`list.ts` is read-only: it prints every subtitle stream of every video in
+`input/` — position, codec, language, title — and marks the one
+`subtitleStream` in `config.ts` points at. Set that index, then `extract.ts`
+writes `input/<name>.srt`. An ASS/SSA stream also leaves its script behind as
 `input/<name>.ass` — SRT has nowhere to put styles, margins or `\pos`, and the
 burn-in step reuses those positions. Everything else goes through ffmpeg as
 SRT and has no `.ass`.
 
-| Flag           | Effect                                      |
-| -------------- | ------------------------------------------- |
-| `--force`      | Re-extract, overwriting `.srt` and `.ass`   |
-| `--stream <n>` | Pick the n-th subtitle stream (default `0`) |
+| Flag           | Effect                                                          |
+| -------------- | --------------------------------------------------------------- |
+| `--force`      | Re-extract, overwriting `.srt` and `.ass`                       |
+| `--stream <n>` | Use the n-th stream instead of `subtitleStream` (this run only) |
 
-Run with `DEBUG=1` to list every subtitle stream first. Bitmap subtitles
-(PGS, VobSub, DVD) cannot become text — re-encode with a text track or choose
-another stream with `--stream`.
+Run with `DEBUG=1` to log ffprobe's raw stream details. Bitmap subtitles
+(PGS, VobSub, DVD) cannot become text — `list.ts` and `extract.ts` both say
+so; re-encode with a text track or point `subtitleStream` at a text stream.
 
 ### 3. Translate
 
@@ -208,7 +211,7 @@ line height, so stacked marks (`นี้`) never overlap the line above.
 ## Layout
 
 ```
-command/     extract.ts, translate.ts, validate.ts, hardsub.ts
+command/     list.ts, extract.ts, translate.ts, validate.ts, hardsub.ts
 config.ts    all tunables
 dictionary.json   shared glossary (git-ignored; safe to edit in place)
 test/        pipeline regression tests
@@ -217,6 +220,7 @@ src/
   pipeline/  stage runner, glossary sweep, orchestrator
   subtitle/  SRT parse/stringify, ASS <-> SRT
   dictionary.ts  glossary load/save/filtering
+  streams.ts     subtitle-stream listing (codec, language)
   prompts.ts     per-stage system instructions
   validate.ts    chunk validation
   badchars.ts    bad-character check for finished .srt files

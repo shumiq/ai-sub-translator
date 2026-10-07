@@ -29,10 +29,11 @@ produces a diff on files you did not touch, the defaults drifted; fix that in a
 dedicated commit rather than mixing it into a feature change.
 
 The pipeline entry points are `command/extract.ts`,
-`command/translate.ts`, `command/hardsub.ts`, plus `command/validate.ts` for
-post-hoc checks on finished `output/*.srt` files. Run them from the project
-root (`bun command/extract.ts`); they resolve `PROJECT_ROOT` themselves, so
-cwd does not actually matter, but relative paths in logs assume the root.
+`command/translate.ts`, `command/hardsub.ts`, plus `command/list.ts` (read-only
+stream listing) and `command/validate.ts` for post-hoc checks on finished
+`output/*.srt` files. Run them from the project root (`bun command/extract.ts`);
+they resolve `PROJECT_ROOT` themselves, so cwd does not actually matter, but
+relative paths in logs assume the root.
 
 ## Invariants — do not break these
 
@@ -79,6 +80,7 @@ check in `test/pipeline.test.ts`.
 | SRT read/write                      | `src/subtitle/srt.ts`      |
 | ASS read/write                      | `src/subtitle/ass.ts`      |
 | ffmpeg/ffprobe wrappers             | `src/ffmpeg.ts`            |
+| Subtitle-stream listing             | `src/streams.ts`           |
 
 ## Conventions
 
@@ -107,7 +109,8 @@ check in `test/pipeline.test.ts`.
   aborts the whole file; a `HighDemandError` means every key was rate-limited.
   Both are reported in the summary rather than crashing the run.
 - **bitmap subtitles cannot be extracted.** PGS/VobSub/DVB have no text form;
-  `extract.ts` says so and suggests `--stream`. This is not a bug to fix.
+  `list.ts` marks them and `extract.ts` refuses them. Point `subtitleStream` in
+  `config.ts` (or `--stream`) at a text track instead. This is not a bug to fix.
 - **Burn-in must use `ass=…:shaping=complex`.** The `subtitles` filter has no
   `shaping` option, and libass's default (`auto`) picks the simple shaper, which
   puts Thai vowels and tone marks on one level instead of stacking them — every

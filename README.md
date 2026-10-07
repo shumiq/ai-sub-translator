@@ -126,10 +126,11 @@ which draws Thai vowels and tone marks side by side on one level instead of
 stacking them. Complex shaping routes through HarfBuzz, so `นี้` and `เดี๋ยว`
 come out correctly.
 
-| Flag            | Effect                    |
-| --------------- | ------------------------- |
-| `--file <name>` | Only process one file     |
-| `--force`       | Overwrite existing `.mp4` |
+| Flag            | Effect                                                            |
+| --------------- | ----------------------------------------------------------------- |
+| `--file <name>` | Only process one file                                             |
+| `--force`       | Overwrite existing `.mp4`                                         |
+| `--faststart`   | Remux to `.mp4` with moov first, so web playback starts instantly |
 
 Codecs and rates come from `hardsub` in `config.ts`.
 

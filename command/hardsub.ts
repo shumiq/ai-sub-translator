@@ -27,6 +27,7 @@ const quoted = (value: string) =>
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const force = args.flags.has("force");
+  const faststart = args.flags.has("faststart");
 
   ensureDirs([appConfig.inputDir, appConfig.outputDir, appConfig.tempDir]);
   await assertFfmpegAvailable();
@@ -158,8 +159,33 @@ async function main() {
 
     try {
       await runFfmpeg(ffmpegArgs, { stream: true });
-      if (existsSync(target)) unlinkSync(target);
-      renameSync(join(PROJECT_ROOT, encodedRelative), target);
+      if (faststart) {
+        // Renaming the .mkv keeps the moov atom at the end of the file, so a
+        // browser can neither start playback nor seek until the whole download
+        // arrives. Remux into a real .mp4 with +faststart instead — streams
+        // are copied, so the extra pass costs nothing in quality.
+        const faststartRelative = `${appConfig.tempDir}/${stem}.faststart.mp4`;
+        await runFfmpeg(
+          [
+            "-i",
+            encodedRelative,
+            "-map",
+            "0",
+            "-c",
+            "copy",
+            "-movflags",
+            "+faststart",
+            faststartRelative,
+          ],
+          { stream: true },
+        );
+        unlinkSync(join(PROJECT_ROOT, encodedRelative));
+        if (existsSync(target)) unlinkSync(target);
+        renameSync(join(PROJECT_ROOT, faststartRelative), target);
+      } else {
+        if (existsSync(target)) unlinkSync(target);
+        renameSync(join(PROJECT_ROOT, encodedRelative), target);
+      }
       Logger.success(`Wrote ${relative(PROJECT_ROOT, target)}`);
       built++;
     } catch (error) {

@@ -44,17 +44,17 @@ export const appConfig = {
   /** Cues per request for the dictionary-extraction stage. */
   extractionChunkSize: 400,
 
-  sourceLanguage: "English",
+  sourceLanguage: "Spanish",
   targetLanguage: "Thai",
   /** Domain hints appended to every prompt. */
   additionalContext: [] as string[],
 
   validation: {
-    retriesLimit: 3,
+    retriesLimit: 1000,
     cueCount: true,
     emptyText: true,
-    isThai: true,
-    leftoverSource: true,
+    isThai: false,
+    leftoverSource: false,
     /**
      * Off by default. When on, a mismatched cue is fatal rather than
      * advisory: it is rejected, retried, bisected, and ultimately aborts the

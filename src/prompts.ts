@@ -27,13 +27,26 @@ const glossaryBlock = (terms: Record<string, DictionaryEntry>): string => {
   return `\n<glossary>\nUse these established renderings. They are already agreed upon — do not invent alternatives.\n${asJson(terms)}\n</glossary>\n`;
 };
 
-const previousBlock = (cues: Cue[], label: string): string => {
-  if (cues.length === 0) return "";
-  const items = toPromptCues(cues)
+const cueList = (cues: PromptCue[]): string =>
+  cues
     .map((cue) => `  ${cue.id}. ${cue.text.replace(/\n/g, " / ")}`)
     .join("\n");
-  return `\n<${label}>\nAlready-final output immediately before this chunk. Match its tone, romanization and particle choices for continuity.\n${items}\n</${label}>\n`;
-};
+
+/** Source-language cues before this chunk, so the model sees the scene. */
+const previousInputBlock = (cues: Cue[]): string =>
+  cues.length === 0
+    ? ""
+    : `\n<previous_input>\n${appConfig.sourceLanguage} cues immediately before this chunk, for scene context.\n${cueList(toPromptCues(cues))}\n</previous_input>\n`;
+
+/**
+ * What this run has already produced for the cues before this chunk. Without
+ * it each chunk is translated blind and register — including whether the
+ * speaker gendered their self-reference — drifts at every chunk boundary.
+ */
+const previousOutputBlock = (cues: PromptCue[]): string =>
+  cues.length === 0
+    ? ""
+    : `\n<previous_output>\nAlready-translated ${appConfig.targetLanguage} output immediately before this chunk. Match its register, tone and particle choices so the scene does not change voice mid-file.\n${cueList(cues)}\n</previous_output>\n`;
 
 export interface StagePromptInput {
   /** Cues this stage rewrites. For review stages this is the ${original}. */
@@ -42,6 +55,8 @@ export interface StagePromptInput {
   current: Cue[];
   /** Already-finalised cues immediately before this chunk, for continuity. */
   context: Cue[];
+  /** Output produced so far for the cues before this chunk. */
+  previousOutput: PromptCue[];
   glossary: Record<string, DictionaryEntry>;
   feedback: string | null;
 }
@@ -154,7 +169,7 @@ NON-NEGOTIABLE RULES
 2. Subtitles are read at a glance. Translate for the ear of a ${appConfig.targetLanguage} viewer watching in real time: concise, idiomatic, and no more verbose than the source.
 3. Honour speaker intent — sarcasm, teasing, anger, formal register and foreign-accented speech should survive the translation.
 4. Keep established glossary renderings. Keep a character's register consistent across cues.
-5. Match the speaker's gender with natural particles: male speakers may use ครับ/อะ/นะ; female speakers may use ค่ะ/นะ/สิ. Use ครับ or ค่ะ only where the ${appConfig.sourceLanguage} original justifies the formality — do not append them to every single line.
+5. Gendered ${appConfig.targetLanguage} forms — first-person pronouns such as ดิฉัน/ผม and ending particles such as ครับ/ค่ะ/คะ — only where the ${appConfig.sourceLanguage} original gives solid evidence of the speaker's gender: an explicit gendered self-reference or gendered wording in the cue, or a \`gender\` in the glossary. When the original gives no such evidence, fall back to neutral — ฉัน, เรา, คุณ — and no gendered particle. Never guess a speaker's gender from vibes, and do not append ครับ/ค่ะ to every line.
 6. Never leave ${appConfig.sourceLanguage} words untranslated unless they are a deliberate on-screen element (a sign, a brand, a song title).
 7. Do not add explanations, transliterations, speaker labels or commentary. Output only the translations.
 8. Escape nothing: emit plain ${appConfig.targetLanguage} text. Do not include ASS/SRT markup.
@@ -169,10 +184,8 @@ export function translationPrompt(input: StagePromptInput): string {
 <input>
 ${asJson(toPromptCues(input.source))}
 </input>
-${previousBlock(input.context, "previous_output")}
-${glossaryBlock(input.glossary)}
-${feedbackBlock(input.feedback)}
-Translate every cue in <input> into ${appConfig.targetLanguage}. Return {"texts": [...]} with exactly ${input.source.length} entries in the same order.`;
+${previousInputBlock(input.context)}${previousOutputBlock(input.previousOutput)}${glossaryBlock(input.glossary)}${feedbackBlock(input.feedback)}
+Translate every cue in <input> into ${appConfig.targetLanguage}, keeping the voice continuous with <previous_output> where one was given. Return {"texts": [...]} with exactly ${input.source.length} entries in the same order.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -185,7 +198,7 @@ RULES
 1. One output entry per input cue, in the same order. Never merge, split, skip or add cues.
 2. Enforce the glossary exactly. If a rendering drifts from the agreed one, correct it.
 3. Fix mistranslations, wrong speakers, dropped clauses and meaning that flipped.
-4. Enforce character consistency: register, speech style, and gender-appropriate particles per the glossary.
+4. Enforce character consistency: register, speech style, and gendered forms (ดิฉัน/ผม, ครับ/ค่ะ) only where the original cue or the glossary's \`gender\` gives solid evidence of the speaker's gender. Where it does not, the neutral form (ฉัน, เรา, คุณ, no gendered particle) is correct — strip gendered particles the original does not justify.
 5. Remove any untranslated ${appConfig.sourceLanguage} text that slipped through.
 6. Leave cues that are already correct exactly as they are. Do not "improve" wording that is merely different.
 7. Never invent content that is not supported by the original cue.

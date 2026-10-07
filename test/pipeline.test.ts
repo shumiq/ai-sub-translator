@@ -277,6 +277,84 @@ console.log("\nmulti-chunk coverage");
   }
 }
 
+console.log("\nprevious-chunk context");
+// Each chunk past the first is handed the source cues before it plus the
+// output this run already produced for them, so register and gender choices
+// do not restart at every chunk boundary.
+{
+  const savedChunkSize = appConfig.chunkSize;
+  appConfig.chunkSize = 2;
+  try {
+    const many = CUES.concat(
+      parseSrt(["4\n00:00:07,500 --> 00:00:09,000\nFourth line.\n\n"].join("")),
+      parseSrt(["5\n00:00:09,500 --> 00:00:11,000\nFifth line.\n\n"].join("")),
+    );
+    const { client, prompts } = stubClient((prompt) =>
+      ok(inputIds(prompt).map((cue) => `แปล${cue.id}`)),
+    );
+    await runPipeline(many, {
+      client,
+      dictionary: {},
+      dictionaryPath,
+      stages: ["translation"],
+    });
+
+    check(
+      "the first chunk opens cold",
+      !prompts[0]!.includes("<previous_input>") &&
+        !prompts[0]!.includes("<previous_output>"),
+      prompts[0]!.slice(0, 80),
+    );
+    check(
+      "the second chunk sees the previous source cues",
+      prompts[1]!.includes("<previous_input>") &&
+        prompts[1]!.includes("Hello there."),
+      "previous_input missing or empty",
+    );
+    check(
+      "the second chunk sees this run's own output",
+      prompts[1]!.includes("<previous_output>") &&
+        prompts[1]!.includes("แปล1") &&
+        prompts[1]!.includes("แปล2"),
+      "previous_output missing or empty",
+    );
+    check(
+      "the third chunk sees the chunk before it, not the first",
+      prompts[2]!.includes("แปล3") &&
+        prompts[2]!.includes("แปล4") &&
+        !prompts[2]!.includes("แปล1"),
+      "stale or missing output context",
+    );
+  } finally {
+    appConfig.chunkSize = savedChunkSize;
+  }
+}
+
+console.log("\ngendered forms fall back to neutral");
+{
+  const { client, systems } = stubClient((prompt) =>
+    ok(inputIds(prompt).map((cue) => `ตอบ${cue.id}`)),
+  );
+  await runPipeline(CUES, {
+    client,
+    dictionary: {},
+    dictionaryPath,
+    stages: ["translation", "consistency"],
+  });
+  check(
+    "gendered forms are gated on evidence in translation",
+    systems[0]!.includes("solid evidence") &&
+      systems[0]!.includes("ฉัน, เรา, คุณ"),
+    "rule missing from the translation system prompt",
+  );
+  check(
+    "consistency strips unjustified gendered particles",
+    systems[1]!.includes("solid evidence") &&
+      systems[1]!.includes("strip gendered particles"),
+    "rule missing from the consistency system prompt",
+  );
+}
+
 console.log("\nline count per cue");
 // CUES are all single-line, so a two-line answer is a mismatch.
 {

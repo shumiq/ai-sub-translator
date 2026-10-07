@@ -6,6 +6,7 @@ import {
   stagePrompt,
   stageSystem,
   TEXTS_RESPONSE_SCHEMA,
+  type PromptCue,
   type StagePromptInput,
 } from "../prompts";
 import { validateChunk } from "../validate";
@@ -120,6 +121,21 @@ export async function runTextStage(
   const system = stageSystem(stage);
   let completed = 0;
 
+  // Texts this run has already committed, keyed by source cue index. Chunks
+  // are walked in order, so everything before `from` is in here by the time a
+  // request goes out — including the left half once a chunk has been bisected.
+  const produced = new Map<number, string>();
+
+  const outputBefore = (from: number): PromptCue[] => {
+    const cues: PromptCue[] = [];
+    for (let i = Math.max(0, from - previousCueCount); i < from; i++) {
+      const text = produced.get(i);
+      if (text === undefined) continue;
+      cues.push({ id: source[i]!.index, text });
+    }
+    return cues;
+  };
+
   const request = async (
     from: number,
     size: number,
@@ -130,6 +146,7 @@ export async function runTextStage(
       source: chunk,
       current: current.slice(from, from + size),
       context: contextCues.slice(Math.max(0, from - previousCueCount), from),
+      previousOutput: outputBefore(from),
       glossary,
       feedback,
     };
@@ -170,6 +187,7 @@ export async function runTextStage(
         `${stage} cues ${from + 1}-${to}`,
       );
       if (!error) {
+        texts.forEach((text, offset) => produced.set(from + offset, text));
         completed += size;
         onProgress?.(completed, source.length);
         return texts;

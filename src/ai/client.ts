@@ -45,15 +45,16 @@ const isRetryable = (error: unknown) => {
 };
 
 /**
- * Gemini wrapper with comma-separated key rotation and bounded retries.
+ * Gemini wrapper over comma-separated keys with bounded retries.
  *
- * 429 rotates to the next key immediately; 5xx retries the same key with
- * exponential backoff. Blocks from content filters are surfaced as typed
- * errors so the pipeline can skip the offending file.
+ * Keys are picked at random per attempt to spread load; a key that returns
+ * 429 is dropped for the rest of the request so exhaustion means every key
+ * really was tried. 5xx retries with exponential backoff. Blocks from content
+ * filters are surfaced as typed errors so the pipeline can skip the offending
+ * file.
  */
 export class AiClient {
   private readonly clients: GoogleGenAI[];
-  private cursor = 0;
   private readonly model: string;
   private readonly thinking: ThinkingSetting;
 
@@ -76,13 +77,9 @@ export class AiClient {
     );
   }
 
-  get activeKeyIndex() {
-    return this.cursor;
-  }
-
-  private rotateKey() {
-    this.cursor = (this.cursor + 1) % this.clients.length;
-    Logger.debug(`Rotating to API key #${this.cursor + 1}`);
+  private pickKey(available: number[]): number {
+    // ponytail: random per request spreads RPS/RPM load across keys
+    return available[Math.floor(Math.random() * available.length)]!;
   }
 
   private async call(client: GoogleGenAI, request: AiRequest): Promise<string> {
@@ -130,30 +127,35 @@ export class AiClient {
   }
 
   /**
-   * Sends one request, rotating API keys on 429 and backing off on 5xx.
+   * Sends one request, dropping rate-limited keys and backing off on 5xx.
    * Rate limiting gives up only once every key has been tried.
    */
   async generate(request: AiRequest): Promise<string> {
     const label = request.label ?? "request";
-    let rateLimits = 0;
+    const limited = new Set<number>();
+    let attempt = 1;
 
-    for (let attempt = 1; ; attempt++) {
+    for (;;) {
+      const available = this.clients
+        .map((_, index) => index)
+        .filter((index) => !limited.has(index));
+      const keyIndex = this.pickKey(available);
+
       try {
-        return await this.call(this.clients[this.cursor]!, request);
+        return await this.call(this.clients[keyIndex]!, request);
       } catch (error) {
         if (error instanceof ProhibitedContentError) throw error;
         if (!isRetryable(error)) throw error;
 
         if (isRateLimited(error)) {
-          rateLimits++;
-          if (rateLimits > this.clients.length) {
+          limited.add(keyIndex);
+          if (limited.size >= this.clients.length) {
             throw new HighDemandError(
               `All ${this.clients.length} API key(s) hit a rate limit during ${label}.`,
             );
           }
-          this.rotateKey();
           Logger.debug(
-            `Rate limited during ${label}; retrying on key #${this.cursor + 1}`,
+            `Rate limited during ${label}; retrying on another key (${limited.size}/${this.clients.length} tried)`,
           );
           continue;
         }
@@ -168,6 +170,7 @@ export class AiClient {
           `Transient ${statusOf(error)} during ${label}; retrying in ${delay}ms`,
         );
         await sleep(delay);
+        attempt++;
       }
     }
   }

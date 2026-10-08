@@ -39,7 +39,7 @@ export const appConfig = {
   previousCueCount: 25,
   temperature: 0.3,
   /** "off" | "low" | "medium" | "high" — gemini-flash-lite defaults to "off". */
-  thinking: "low" as "off" | "low" | "medium" | "high",
+  thinking: "high" as "off" | "low" | "medium" | "high",
 
   /** Cues per request for the dictionary-extraction stage. */
   extractionChunkSize: 400,

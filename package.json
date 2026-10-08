@@ -4,7 +4,7 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "test": "bun test/pipeline.test.ts",
+    "test": "bun test",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",
     "check": "bun run typecheck && bun run test",

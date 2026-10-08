@@ -66,21 +66,22 @@ check in `test/pipeline.test.ts`.
 
 ## Where things live
 
-| Concern                             | File                       |
-| ----------------------------------- | -------------------------- |
-| All tunables                        | `config.ts`                |
-| Shared types                        | `src/types.ts`             |
-| Gemini calls, key rotation, retries | `src/ai/client.ts`         |
-| Retry-on-feedback, chunk bisection  | `src/pipeline/stage.ts`    |
-| Glossary sweep                      | `src/pipeline/glossary.ts` |
-| Stage orchestration                 | `src/pipeline/index.ts`    |
-| Prompt text                         | `src/prompts.ts`           |
-| Chunk validation                    | `src/validate.ts`          |
-| Bad-character check for output      | `src/badchars.ts`          |
-| SRT read/write                      | `src/subtitle/srt.ts`      |
-| ASS read/write                      | `src/subtitle/ass.ts`      |
-| ffmpeg/ffprobe wrappers             | `src/ffmpeg.ts`            |
-| Subtitle-stream listing             | `src/streams.ts`           |
+| Concern                             | File                         |
+| ----------------------------------- | ---------------------------- |
+| All tunables                        | `config.ts`                  |
+| Shared types                        | `src/types.ts`               |
+| Gemini calls, key rotation, retries | `src/ai/client.ts`           |
+| Retry-on-feedback, chunk bisection  | `src/pipeline/stage.ts`      |
+| Glossary sweep                      | `src/pipeline/glossary.ts`   |
+| Cue speaker/addressee verdicts      | `src/pipeline/evaluation.ts` |
+| Stage orchestration                 | `src/pipeline/index.ts`      |
+| Prompt text                         | `src/prompts.ts`             |
+| Chunk validation                    | `src/validate.ts`            |
+| Bad-character check for output      | `src/badchars.ts`            |
+| SRT read/write                      | `src/subtitle/srt.ts`        |
+| ASS read/write                      | `src/subtitle/ass.ts`        |
+| ffmpeg/ffprobe wrappers             | `src/ffmpeg.ts`              |
+| Subtitle-stream listing             | `src/streams.ts`             |
 
 ## Conventions
 

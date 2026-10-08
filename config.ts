@@ -27,6 +27,7 @@ export const appConfig = {
   /** Stages to run, in order. */
   pipeline: [
     "extraction",
+    "evaluation",
     "translation",
     "consistency",
     "humanization",

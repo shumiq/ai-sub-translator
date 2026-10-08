@@ -13,6 +13,7 @@ import type { PipelineStage } from "../src/types";
 
 const STAGES: PipelineStage[] = [
   "extraction",
+  "evaluation",
   "translation",
   "consistency",
   "humanization",

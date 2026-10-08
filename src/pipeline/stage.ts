@@ -10,7 +10,7 @@ import {
   type StagePromptInput,
 } from "../prompts";
 import { validateChunk } from "../validate";
-import type { Cue, DictionaryEntry, PipelineStage } from "../types";
+import type { Cue, DictionaryEntry, Evaluation, PipelineStage } from "../types";
 
 /**
  * Pulls the first JSON payload out of a model response. Constrained decoding
@@ -87,6 +87,8 @@ export interface StageOptions {
   context?: Cue[];
   chunkSize?: number;
   previousCueCount?: number;
+  /** Speaker/addressee verdicts from the evaluation stage, keyed by cue index. */
+  evaluation?: Evaluation;
   glossary?: Record<string, DictionaryEntry>;
   onProgress?: (done: number, total: number) => void;
 }
@@ -109,6 +111,7 @@ export async function runTextStage(
     current = [],
     chunkSize = appConfig.chunkSize,
     previousCueCount = appConfig.previousCueCount,
+    evaluation = {},
     glossary = {},
     onProgress,
   } = options;
@@ -142,11 +145,15 @@ export async function runTextStage(
     feedback: string | null,
   ) => {
     const chunk = source.slice(from, from + size);
+    const evaluationCues: PromptCue[] = chunk
+      .map((cue) => ({ id: cue.index, text: evaluation[cue.index] ?? "" }))
+      .filter((item) => item.text.length > 0);
     const input: StagePromptInput = {
       source: chunk,
       current: current.slice(from, from + size),
       context: contextCues.slice(Math.max(0, from - previousCueCount), from),
       previousOutput: outputBefore(from),
+      evaluation: evaluationCues,
       glossary,
       feedback,
     };

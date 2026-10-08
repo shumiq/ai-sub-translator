@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { appConfig } from "../config";
 import {
   consistencySystem,
+  evaluationSystem,
   extractionPrompt,
   extractionSystem,
   humanizationPrompt,
@@ -26,6 +27,7 @@ const input = (
   current: [cue(1, "สวัสดี"), cue(2, "ลาก่อน")],
   context: [],
   previousOutput: [],
+  evaluation: [],
   glossary: {},
   feedback: null,
   ...overrides,
@@ -35,6 +37,7 @@ describe("system prompts", () => {
   test("every stage carries the blind-input rule", () => {
     for (const system of [
       extractionSystem(),
+      evaluationSystem(),
       translationSystem(),
       consistencySystem(),
       humanizationSystem(),
@@ -99,10 +102,11 @@ describe("stage prompts", () => {
     expect(prompt).toContain("exactly 2 entries");
   });
 
-  test("review stages feed original next to translated", () => {
+  test("review stages pair original and translated per cue", () => {
     const prompt = humanizationPrompt(input());
-    expect(prompt).toContain("<original>");
-    expect(prompt).toContain("<translated>");
+    expect(prompt).toContain("<cues>");
+    expect(prompt).toContain('"original": "Hola"');
+    expect(prompt).toContain('"translated": "สวัสดี"');
     expect(prompt).toContain("who speaks or who is addressed");
   });
 
@@ -121,5 +125,19 @@ describe("stage prompts", () => {
 
   test("extraction tells the model user-pinned entries are final", () => {
     expect(extractionPrompt(input())).toContain("pinned by the user");
+  });
+
+  test("evaluation verdicts are attached to the cues in later stages", () => {
+    const evaluated = input({
+      evaluation: [{ id: 1, text: "male to female" }],
+    });
+    expect(translationPrompt(evaluated)).toContain(
+      '"evaluation": "male to female"',
+    );
+    expect(translationPrompt(evaluated)).toContain('"evaluation": "neutral"');
+    expect(humanizationPrompt(evaluated)).toContain(
+      '"evaluation": "male to female"',
+    );
+    expect(translationSystem()).toContain("evaluation");
   });
 });

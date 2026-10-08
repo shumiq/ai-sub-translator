@@ -99,6 +99,7 @@ export async function runGlossaryStage(
         current: [],
         context: [],
         previousOutput: [],
+        evaluation: [],
         glossary: dictionary,
         feedback,
       };

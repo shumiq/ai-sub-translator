@@ -1,5 +1,13 @@
 export type PipelineStage =
-  "extraction" | "translation" | "consistency" | "humanization";
+  "extraction" | "evaluation" | "translation" | "consistency" | "humanization";
+
+/**
+ * Per-cue classification from the evaluation stage — who speaks and who is
+ * addressed, keyed by source cue index. A plain string so the model can say
+ * "male to female", "father to daughter (Ana)" or just "neutral". It only ever
+ * describes the cue it is keyed to; the pipeline never lets it bleed sideways.
+ */
+export type Evaluation = Record<number, string>;
 
 /** One subtitle cue: timings plus its display lines. */
 export interface Cue {

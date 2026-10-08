@@ -2,7 +2,8 @@ import type { AiClient } from "../ai/client";
 import { Logger } from "../logger";
 import { relevantTerms, saveDictionary } from "../dictionary";
 import { stripInlineTags } from "../subtitle/srt";
-import type { Cue, Dictionary, PipelineStage } from "../types";
+import type { Cue, Dictionary, Evaluation, PipelineStage } from "../types";
+import { runEvaluationStage } from "./evaluation";
 import { runGlossaryStage } from "./glossary";
 import { runTextStage } from "./stage";
 
@@ -42,6 +43,7 @@ export async function runPipeline(
 ): Promise<Cue[]> {
   const { client, dictionary, dictionaryPath, stages } = options;
   let glossary = dictionary;
+  let evaluation: Evaluation = {};
   let current = original;
 
   for (const stage of stages) {
@@ -65,6 +67,17 @@ export async function runPipeline(
       continue;
     }
 
+    if (stage === "evaluation") {
+      evaluation = await runEvaluationStage(client, {
+        source: original,
+        onProgress: progress(stage),
+      });
+      Logger.info(
+        `evaluation: ${Object.keys(evaluation).length} cue(s) classified`,
+      );
+      continue;
+    }
+
     const texts = await runTextStage(client, {
       stage,
       source: original,
@@ -72,6 +85,7 @@ export async function runPipeline(
       // the source directly and only borrows it as scene context.
       current: stage === "translation" ? [] : current,
       context: stage === "translation" ? original : current,
+      evaluation,
       glossary: relevantTerms(glossary, allText(current)),
       onProgress: progress(stage),
     });

@@ -82,6 +82,11 @@ export async function runGlossaryStage(
   const collected: Record<string, DictionaryEntry> = {};
   const system = extractionSystem();
   const maxRetries = appConfig.validation.retriesLimit || 3;
+  // Hand-edited keys may be any case while the model always returns lowercase
+  // keys; compare case-insensitively or a self-edit gets a duplicate shadow.
+  const existing = new Set(
+    Object.keys(dictionary).map((key) => key.toLowerCase()),
+  );
 
   for (let from = 0; from < source.length; from += chunkSize) {
     const chunk = source.slice(from, from + chunkSize);
@@ -120,7 +125,7 @@ export async function runGlossaryStage(
       if (!name) continue;
 
       const key = name.toLowerCase();
-      if (dictionary[key] || collected[key]) continue;
+      if (existing.has(key) || collected[key]) continue;
 
       const entry = toEntry(raw);
       if (!entry) continue;

@@ -39,14 +39,16 @@ const previousInputBlock = (cues: Cue[]): string =>
     : `\n<previous_input>\n${appConfig.sourceLanguage} cues immediately before this chunk, for scene context.\n${cueList(toPromptCues(cues))}\n</previous_input>\n`;
 
 /**
- * What this run has already produced for the cues before this chunk. Without
- * it each chunk is translated blind and register — including whether the
- * speaker gendered their self-reference — drifts at every chunk boundary.
+ * What this run has already produced for the cues before this chunk, so
+ * terminology and wording stay continuous across chunk boundaries. It is
+ * deliberately not offered as evidence about people: the model is blind, so
+ * reading speaker, gender or register off its own earlier output is guessing,
+ * and that guess is the failure mode this block must not invite.
  */
 const previousOutputBlock = (cues: PromptCue[]): string =>
   cues.length === 0
     ? ""
-    : `\n<previous_output>\nAlready-translated ${appConfig.targetLanguage} output immediately before this chunk. Match its register, tone and particle choices so the scene does not change voice mid-file.\n${cueList(cues)}\n</previous_output>\n`;
+    : `\n<previous_output>\nAlready-translated ${appConfig.targetLanguage} output immediately before this chunk. Match its terminology and wording style so the scene does not change voice mid-file. It is not evidence about who speaks: inherit no gender, no ending particle, no kinship or self-reference term from it. Who speaks a cue is decided by that cue's own text alone.\n${cueList(cues)}\n</previous_output>\n`;
 
 export interface StagePromptInput {
   /** Cues this stage rewrites. For review stages this is the ${original}. */
@@ -78,6 +80,14 @@ const lineBreakRule = () =>
     ? `LINE BREAKS: a cue whose source contains "\\n" must come back with exactly the same number of lines, separated by "\\n", broken at the same point. Never merge two source lines into one and never split one into two.`
     : `LINE BREAKS: re-break each cue wherever the ${appConfig.targetLanguage} reads best. Merging the source's lines or splitting them further is fine, but never leave a cue empty and never let one run past two lines — it has to stay readable as a subtitle.`;
 
+/**
+ * The model gets cue text and nothing else — no video, audio, speaker labels
+ * or plot knowledge. Stated once here so every stage inherits it instead of
+ * each inventing its own version of "do not guess".
+ */
+const blindRule = () =>
+  `BLIND INPUT: you see subtitle text only — no video, audio, speaker labels or knowledge of the plot. Never invent what the cues do not state: who speaks, who is addressed, gender, relationships, setting, events. This holds per cue: a neighbouring cue or <previous_output> says nothing about who speaks this cue. Where the source stays ambiguous, keep the ${appConfig.targetLanguage} equally ambiguous — resolving ambiguity is guessing.`;
+
 export const TEXTS_RESPONSE_SCHEMA = {
   type: "object",
   properties: {
@@ -108,8 +118,7 @@ export const GLOSSARY_RESPONSE_SCHEMA = {
           },
           speakingStyle: {
             type: "string",
-            description:
-              "How this character talks, in Thai. Only for characters.",
+            description: `How this character talks, in ${appConfig.targetLanguage}. Only for characters.`,
           },
           prohibitedPhrases: {
             type: "array",
@@ -140,10 +149,12 @@ RULES
 - The \`name\` field must be the original ${appConfig.sourceLanguage} spelling, exactly as it appears in the subtitles.
 - Every other field must be in ${appConfig.targetLanguage}.
 - \`translations\` holds one or more accepted ${appConfig.targetLanguage} renderings; the first entry is the preferred one. Prefer the form a ${appConfig.targetLanguage} dub would actually say.
-- Set \`gender\` only for characters, and only when the cues make it clear.
+- Set \`gender\` only for characters, and only when a cue states it outright — an explicit gendered self-reference or an explicitly gendered name. Never guess from how a name sounds or from context.
+- Do not infer relationships or roles (mother, boss, detective) that the cues never state.
 - \`speakingStyle\` and \`prohibitedPhrases\` are for characters with a distinctive voice.
 - Never include episode numbers, timestamps or generic nouns such as "door", "run" or "angry".
 - Do not invent terms that are absent from the input.
+${blindRule()}
 ${contextBlock(appConfig.additionalContext)}`;
 }
 
@@ -155,7 +166,7 @@ ${asJson(toPromptCues(input.source))}
 </input>
 
 ${glossaryBlock(input.glossary)}${feedbackBlock(input.feedback)}
-Extract the terms from <input> that are NOT already covered by the glossary. Look at neighbouring cues for how a character is addressed before you decide a name is the same person. Return {"items": [...]}. Return an empty array if nothing new qualifies.`;
+Extract the terms from <input> that are NOT already covered by the glossary. Existing entries are pinned by the user — never propose a different rendering for a term the glossary already lists, skip it entirely. Look at neighbouring cues for how a character is addressed before you decide a name is the same person. Return {"items": [...]}. Return an empty array if nothing new qualifies.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -168,13 +179,15 @@ NON-NEGOTIABLE RULES
 1. One output entry per input cue, in the same order. Never merge cues, never split a cue, never skip a cue, never add one.
 2. Subtitles are read at a glance. Translate for the ear of a ${appConfig.targetLanguage} viewer watching in real time: concise, idiomatic, and no more verbose than the source.
 3. Honour speaker intent — sarcasm, teasing, anger, formal register and foreign-accented speech should survive the translation.
-4. Keep established glossary renderings. Keep a character's register consistent across cues.
-5. Gendered ${appConfig.targetLanguage} forms — first-person pronouns such as ดิฉัน/ผม and ending particles such as ครับ/ค่ะ/คะ — only where the ${appConfig.sourceLanguage} original gives solid evidence of the speaker's gender: an explicit gendered self-reference or gendered wording in the cue, or a \`gender\` in the glossary. When the original gives no such evidence, fall back to neutral — ฉัน, เรา, คุณ — and no gendered particle. Never guess a speaker's gender from vibes, and do not append ครับ/ค่ะ to every line.
-6. Never leave ${appConfig.sourceLanguage} words untranslated unless they are a deliberate on-screen element (a sign, a brand, a song title).
-7. Do not add explanations, transliterations, speaker labels or commentary. Output only the translations.
-8. Escape nothing: emit plain ${appConfig.targetLanguage} text. Do not include ASS/SRT markup.
+4. Keep established glossary renderings. Do not carry a register, self-reference or particle choice across cues — cues are not tagged with speakers, so consistency across cues is not yours to enforce.
+5. Gendered ${appConfig.targetLanguage} forms — first-person pronouns such as ดิฉัน/ผม and ending particles such as ครับ/ค่ะ/คะ — only where *this* cue gives solid evidence of the speaker's gender: an explicit gendered self-reference or gendered wording in the cue. A \`gender\` in the glossary counts only if this cue itself names that character as the speaker; otherwise it tells you nothing. When the cue gives no such evidence, fall back to neutral — ฉัน, เรา, คุณ — and no gendered particle. Never guess a speaker's gender from vibes, from neighbouring cues or from <previous_output>, and do not append ครับ/ค่ะ to every line.
+6. Add nothing the source does not state: no names for unnamed people, no relationship or kinship terms (e.g. พ่อ, ลูก, หนู, พี่, น้อง), no self-reference the cue does not make, no addressee the cue does not address, no resolving a pronoun whose referent the text never pins down.
+7. Never leave ${appConfig.sourceLanguage} words untranslated unless they are a deliberate on-screen element (a sign, a brand, a song title).
+8. Do not add explanations, transliterations, speaker labels or commentary. Output only the translations.
+9. Escape nothing: emit plain ${appConfig.targetLanguage} text. Do not include ASS/SRT markup.
 
 ${lineBreakRule()}
+${blindRule()}
 ${contextBlock(appConfig.additionalContext)}`;
 }
 
@@ -198,13 +211,14 @@ RULES
 1. One output entry per input cue, in the same order. Never merge, split, skip or add cues.
 2. Enforce the glossary exactly. If a rendering drifts from the agreed one, correct it.
 3. Fix mistranslations, wrong speakers, dropped clauses and meaning that flipped.
-4. Enforce character consistency: register, speech style, and gendered forms (ดิฉัน/ผม, ครับ/ค่ะ) only where the original cue or the glossary's \`gender\` gives solid evidence of the speaker's gender. Where it does not, the neutral form (ฉัน, เรา, คุณ, no gendered particle) is correct — strip gendered particles the original does not justify.
+4. Enforce character consistency within the cue: register, speech style, and gendered forms (ดิฉัน/ผม, ครับ/ค่ะ) only where the original cue itself gives solid evidence of the speaker's gender. A glossary \`gender\` counts only if the cue names that character; never infer the speaker from <previous_output> or neighbouring cues. Where the cue does not, the neutral form (ฉัน, เรา, คุณ, no gendered particle) is correct — strip gendered particles, kinship terms (พ่อ, ลูก, หนู) and self-references the original does not justify.
 5. Remove any untranslated ${appConfig.sourceLanguage} text that slipped through.
 6. Leave cues that are already correct exactly as they are. Do not "improve" wording that is merely different.
-7. Never invent content that is not supported by the original cue.
+7. Never invent content that is not supported by the original cue, and never resolve ambiguity the original leaves open — unclear speaker, referent or gender. An equally ambiguous translation is the correct one.
 8. Output only the corrected ${appConfig.targetLanguage} texts, with no markup or commentary.
 
 ${lineBreakRule()}
+${blindRule()}
 ${contextBlock(appConfig.additionalContext)}`;
 }
 
@@ -218,9 +232,9 @@ ${asJson(toPromptCues(input.source))}
 <translated>
 ${asJson(toPromptCues(input.current))}
 </translated>
-${glossaryBlock(input.glossary)}
+${previousOutputBlock(input.previousOutput)}${glossaryBlock(input.glossary)}
 ${feedbackBlock(input.feedback)}
-Correct the <translated> cues using the <original> as the source of truth and the glossary for terminology. Return {"texts": [...]} with exactly ${input.source.length} entries in the same order.`;
+Correct the <translated> cues using the <original> as the source of truth and the glossary for terminology, keeping the voice continuous with <previous_output> where one was given. Return {"texts": [...]} with exactly ${input.source.length} entries in the same order.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -235,13 +249,15 @@ RULES
 3. Replace stiff, word-for-word constructions with what a ${appConfig.targetLanguage} subtitler would actually write, keeping the meaning intact.
 4. Remove leftover ${appConfig.sourceLanguage} characters, stray punctuation, duplicated words and machine artefacts such as "word (translation)".
 5. Do not add words, embellish, explain or lengthen. Do not invent jokes or reactions.
-6. Do not add explanatory parentheses unless the original had them.
-7. Vary sentence rhythm. Do not end every line with the same particle; real dialogue does not.
-8. Keep it short enough to read on screen. If a cue is needlessly long, tighten it without losing meaning.
-9. Leave deliberate on-screen text (signs, brands, song titles) alone.
-10. Output only the ${appConfig.targetLanguage} text, with no markup or commentary.
+6. Do not assume who is speaking or being spoken to. A subtitle cue carries no speaker labels, so never invent names, relationships, gender or addressees: no nicknames, no kinship terms (พ่อ, ลูก, หนู, พี่, น้อง), no gendered pronouns or particles (ครับ/ค่ะ/ดิฉัน/ผม), no "he/she said" implications unless the original cue itself states them — and never read the speaker off <previous_output> or a neighbouring cue. When in doubt, keep the wording neutral.
+7. Do not add explanatory parentheses unless the original had them.
+8. Vary sentence rhythm. Do not end every line with the same particle; real dialogue does not.
+9. Keep it short enough to read on screen. If a cue is needlessly long, tighten it without losing meaning.
+10. Leave deliberate on-screen text (signs, brands, song titles) alone.
+11. Output only the ${appConfig.targetLanguage} text, with no markup or commentary.
 
 ${lineBreakRule()}
+${blindRule()}
 ${contextBlock(appConfig.additionalContext)}`;
 }
 
@@ -255,9 +271,9 @@ ${asJson(toPromptCues(input.source))}
 <translated>
 ${asJson(toPromptCues(input.current))}
 </translated>
-${glossaryBlock(input.glossary)}
+${previousOutputBlock(input.previousOutput)}${glossaryBlock(input.glossary)}
 ${feedbackBlock(input.feedback)}
-Lightly humanize the <translated> cues for natural ${appConfig.targetLanguage} subtitle reading. Return {"texts": [...]} with exactly ${input.source.length} entries in the same order.`;
+Lightly humanize the <translated> cues for natural ${appConfig.targetLanguage} subtitle reading, using <original> to confirm the meaning — polish must not change what the cue says, who speaks or who is addressed — and keep the voice continuous with <previous_output> where one was given. Return {"texts": [...]} with exactly ${input.source.length} entries in the same order.`;
 }
 
 export function stageSystem(stage: string): string {

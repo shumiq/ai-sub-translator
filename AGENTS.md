@@ -18,7 +18,7 @@ Guidance for coding agents working in this repository.
 
 ```bash
 bun run typecheck   # tsc --noEmit — must be clean
-bun run test        # pipeline regression tests, no network / API key required
+bun run test        # unit + pipeline regression tests, no network / API key required
 bun run check       # both, run before finishing any change
 bun run format      # prettier --write .
 ```
@@ -28,12 +28,12 @@ source is already prettier-clean, so `bun run format` should be a no-op. If it
 produces a diff on files you did not touch, the defaults drifted; fix that in a
 dedicated commit rather than mixing it into a feature change.
 
-The pipeline entry points are `command/extract.ts`,
-`command/translate.ts`, `command/hardsub.ts`, plus `command/list.ts` (read-only
-stream listing) and `command/validate.ts` for post-hoc checks on finished
-`output/*.srt` files. Run them from the project root (`bun command/extract.ts`);
-they resolve `PROJECT_ROOT` themselves, so cwd does not actually matter, but
-relative paths in logs assume the root.
+The pipeline entry points are `command/extract.ts` (lists each video's
+subtitle streams and prompts for the one to pull — needs a TTY),
+`command/translate.ts`, `command/hardsub.ts`, and `command/validate.ts` for
+post-hoc checks on finished `output/*.srt` files. Run them from the project
+root (`bun command/extract.ts`); they resolve `PROJECT_ROOT` themselves, so
+cwd does not actually matter, but relative paths in logs assume the root.
 
 ## Invariants — do not break these
 
@@ -109,8 +109,8 @@ check in `test/pipeline.test.ts`.
   aborts the whole file; a `HighDemandError` means every key was rate-limited.
   Both are reported in the summary rather than crashing the run.
 - **bitmap subtitles cannot be extracted.** PGS/VobSub/DVB have no text form;
-  `list.ts` marks them and `extract.ts` refuses them. Point `subtitleStream` in
-  `config.ts` (or `--stream`) at a text track instead. This is not a bug to fix.
+  `extract.ts` marks them in the listing and refuses them at the prompt. Pick a
+  text track instead. This is not a bug to fix.
 - **Burn-in must use `ass=…:shaping=complex`.** The `subtitles` filter has no
   `shaping` option, and libass's default (`auto`) picks the simple shaper, which
   puts Thai vowels and tone marks on one level instead of stacking them — every

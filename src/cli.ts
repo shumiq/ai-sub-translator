@@ -1,3 +1,6 @@
+import { createInterface } from "node:readline/promises";
+import { Logger } from "./logger";
+
 export interface ParsedArgs {
   flags: Set<string>;
   values: Record<string, string>;
@@ -37,4 +40,41 @@ export function parseArgs(argv: string[]): ParsedArgs {
   }
 
   return { flags, values, positional };
+}
+
+export interface PromptOptions {
+  /** Shown in brackets and used when the answer is empty. */
+  default?: string;
+  /** Return an error message to re-ask, or undefined to accept. */
+  validate?: (answer: string) => string | undefined;
+}
+
+/**
+ * Ask one question on stdin and resolve with the answer. An empty line picks
+ * `options.default`; a failing `validate` re-asks instead of throwing. The
+ * caller is responsible for checking stdin is a TTY first — otherwise
+ * `rl.question` hangs forever on piped input that never sends a newline.
+ */
+export async function prompt(
+  question: string,
+  options: PromptOptions = {},
+): Promise<string> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    for (;;) {
+      const raw = (
+        await rl.question(
+          options.default === undefined
+            ? `${question} `
+            : `${question} [${options.default}] `,
+        )
+      ).trim();
+      const answer = raw === "" ? (options.default ?? "") : raw;
+      const error = options.validate?.(answer);
+      if (error === undefined) return answer;
+      Logger.warn(error);
+    }
+  } finally {
+    rl.close();
+  }
 }

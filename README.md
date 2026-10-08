@@ -37,26 +37,28 @@ cp some-episode.mkv input/
 ### 2. Extract the subtitles
 
 ```bash
-bun command/list.ts
 bun command/extract.ts
 ```
 
-`list.ts` is read-only: it prints every subtitle stream of every video in
-`input/` — position, codec, language, title — and marks the one
-`subtitleStream` in `config.ts` points at. Set that index, then `extract.ts`
-writes `input/<name>.srt`. An ASS/SSA stream also leaves its script behind as
+For each video in `input/`, `extract.ts` prints every subtitle stream —
+position, codec, language, title — and asks which one to extract. The default
+in brackets comes from `subtitleStream` in `config.ts` (or `--stream <n>` for
+this run); press Enter to take it, or type `s` to skip the file. It writes
+`input/<name>.srt`. An ASS/SSA stream also leaves its script behind as
 `input/<name>.ass` — SRT has nowhere to put styles, margins or `\pos`, and the
 burn-in step reuses those positions. Everything else goes through ffmpeg as
-SRT and has no `.ass`.
+SRT and has no `.ass`. Videos whose output already exists are skipped without
+prompting unless `--force` is given.
 
-| Flag           | Effect                                                          |
-| -------------- | --------------------------------------------------------------- |
-| `--force`      | Re-extract, overwriting `.srt` and `.ass`                       |
-| `--stream <n>` | Use the n-th stream instead of `subtitleStream` (this run only) |
+| Flag           | Effect                                                   |
+| -------------- | -------------------------------------------------------- |
+| `--force`      | Re-extract, overwriting `.srt` and `.ass`                |
+| `--stream <n>` | Pre-fill the prompt with the n-th stream (this run only) |
 
+The prompt needs a TTY: piped stdin fails immediately instead of hanging.
 Run with `DEBUG=1` to log ffprobe's raw stream details. Bitmap subtitles
-(PGS, VobSub, DVD) cannot become text — `list.ts` and `extract.ts` both say
-so; re-encode with a text track or point `subtitleStream` at a text stream.
+(PGS, VobSub, DVD) cannot become text — the listing marks them and the prompt
+refuses them; re-encode with a text track or pick a text stream.
 
 ### 3. Translate
 
@@ -212,10 +214,10 @@ line height, so stacked marks (`นี้`) never overlap the line above.
 ## Layout
 
 ```
-command/     list.ts, extract.ts, translate.ts, validate.ts, hardsub.ts
+command/     extract.ts, translate.ts, validate.ts, hardsub.ts
 config.ts    all tunables
 dictionary.json   shared glossary (git-ignored; safe to edit in place)
-test/        pipeline regression tests
+test/        unit + pipeline regression tests
 src/
   ai/        Gemini client, key rotation, typed errors
   pipeline/  stage runner, glossary sweep, orchestrator
@@ -241,7 +243,7 @@ src/
 
 ```bash
 bun run typecheck   # tsc --noEmit
-bun run test        # pipeline regression tests, no network or API key needed
+bun run test        # unit + pipeline regression tests, no network or API key needed
 bun run check       # both
 bun run format      # prettier --write .
 ```

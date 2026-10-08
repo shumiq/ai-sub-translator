@@ -12,9 +12,8 @@ export const appConfig = {
   dictionaryPath: "dictionary.json",
 
   /**
-   * Which subtitle stream `extract.ts` pulls, counted over the subtitle
-   * streams only. `bun command/list.ts` prints the candidates; `--stream <n>`
-   * overrides it for a single run.
+   * Stream pre-filled in `extract.ts`'s per-file prompt, counted over the
+   * subtitle streams only. `--stream <n>` overrides it for a single run.
    */
   subtitleStream: 0,
 

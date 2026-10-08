@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { appConfig } from "../config";
-import { parseArgs } from "../src/cli";
+import { parseArgs, prompt } from "../src/cli";
 import {
   assertFfmpegAvailable,
   probeStreams,
@@ -68,10 +68,53 @@ async function extractStem(
   return { srt: stringifySrt(cues) };
 }
 
+/**
+ * Print every subtitle stream of `video` and ask which one to extract.
+ * Returns undefined when the user skips the file.
+ */
+async function chooseStream(
+  video: string,
+  streams: MediaStream[],
+  defaultPos: number,
+  hasDefault: boolean,
+): Promise<number | undefined> {
+  const stem = stemOf(video);
+  Logger.step(`${stem}: subtitle streams`);
+  streams.forEach((stream, position) =>
+    Logger.info(describeStream(stream, position)),
+  );
+
+  const answer = await prompt("Extract which stream?", {
+    default: hasDefault ? String(defaultPos) : undefined,
+    validate: (value) => {
+      if (value === "s") return undefined;
+      if (value === "" || !Number.isInteger(Number(value)))
+        return "Enter a stream position, or s to skip";
+      const position = Number(value);
+      if (position < 0 || position >= streams.length)
+        return `Position out of range (0-${streams.length - 1})`;
+      if (!TEXT_CODECS.has(streams[position]!.codec_name))
+        return `#${position} (${streams[position]!.codec_name}) is a bitmap format and cannot be extracted`;
+      return undefined;
+    },
+  });
+
+  return answer === "s" ? undefined : Number(answer);
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const force = args.flags.has("force");
   const requested = args.values.stream;
+
+  // The per-file stream choice is the whole point of this command; without a
+  // terminal on stdin `prompt()` would block forever instead of asking.
+  if (!process.stdin.isTTY) {
+    Logger.error(
+      "stdin is not a TTY — extract.ts asks which subtitle stream to extract for each video",
+    );
+    process.exit(1);
+  }
 
   ensureDirs([appConfig.inputDir, appConfig.tempDir]);
   await assertFfmpegAvailable();
@@ -100,32 +143,50 @@ async function main() {
       continue;
     }
 
-    streams.forEach((stream, position) =>
-      Logger.debug(describeStream(stream, position)),
-    );
-
-    const position =
+    const defaultPos =
       requested === undefined ? appConfig.subtitleStream : Number(requested);
-    const chosen = streams[position];
-    if (!chosen) {
+    if (requested !== undefined && !Number.isInteger(defaultPos)) {
+      Logger.error(`--stream must be a number, got "${requested}"`);
+      failures++;
+      continue;
+    }
+    const defaultStream = streams[defaultPos];
+    const hasDefault =
+      defaultStream !== undefined && TEXT_CODECS.has(defaultStream.codec_name);
+
+    // Already done? Decided before asking: a complete .srt (+ .ass when the
+    // file has an ASS track at all) means there is nothing to choose. The
+    // check repeats against the chosen stream below for the mixed case where
+    // the existing output came from a different codec.
+    const hasAssTrack = streams.some((s) => ASS_CODECS.has(s.codec_name));
+    if (
+      !force &&
+      existsSync(target) &&
+      (existsSync(assTarget) || !hasAssTrack)
+    ) {
+      Logger.info(
+        `${relative(process.cwd(), target)} already exists (use --force to overwrite)`,
+      );
+      continue;
+    }
+
+    if (requested !== undefined && !hasDefault) {
       Logger.error(
-        `${stem}: subtitle stream ${requested ?? appConfig.subtitleStream} ` +
-          `(${requested === undefined ? "config.ts subtitleStream" : "--stream"}) ` +
-          `is out of range (0-${streams.length - 1}) — see \`bun command/list.ts\``,
+        `${stem}: --stream ${requested} ` +
+          (defaultStream === undefined
+            ? `is out of range (0-${streams.length - 1})`
+            : `(${defaultStream.codec_name}) is a bitmap format and cannot be converted to text`),
       );
       failures++;
       continue;
     }
 
-    if (!TEXT_CODECS.has(chosen.codec_name)) {
-      Logger.error(
-        `${stem}: subtitle #${position} (${chosen.codec_name}) is a bitmap format and cannot be converted to text. ` +
-          "Re-encode the video with a text subtitle track, or choose a text stream " +
-          "with `subtitleStream` in config.ts / --stream (`bun command/list.ts` shows them).",
-      );
-      failures++;
+    const position = await chooseStream(video, streams, defaultPos, hasDefault);
+    if (position === undefined) {
+      Logger.info(`${stem}: skipped`);
       continue;
     }
+    const chosen = streams[position]!;
 
     // An ASS track yields two files, and both have to be current before the
     // video counts as done — an .srt from an older run with no matching .ass

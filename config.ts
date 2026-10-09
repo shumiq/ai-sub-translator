@@ -29,9 +29,22 @@ export const appConfig = {
     "extraction",
     "evaluation",
     "translation",
-    "consistency",
     "humanization",
   ] as PipelineStage[],
+
+  /**
+   * After humanization the finished text is audited; only the drifted cues are
+   * repaired, each sent with `neighborCount` cues either side for scene context
+   * (a neighbour's rewrite is discarded). The next audit looks only at the cues
+   * that were just drifted, so drift can only stay level or shrink — never
+   * grow. `maxRounds` is the number of stalled rounds tolerated: a round that
+   * shrinks drift resets the budget, so it only stops a loop that has stopped
+   * improving. Leftover drift is written and reported for manual review.
+   */
+  verification: {
+    maxRounds: 3,
+    neighborCount: 2,
+  },
 
   /** Cues sent to the model per request. */
   chunkSize: 60,

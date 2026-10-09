@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { appConfig } from "../config";
 import {
-  consistencySystem,
   evaluationSystem,
   extractionPrompt,
   extractionSystem,
@@ -9,6 +8,8 @@ import {
   humanizationSystem,
   translationPrompt,
   translationSystem,
+  verificationPrompt,
+  verificationSystem,
   type StagePromptInput,
 } from "../src/prompts";
 import type { Cue } from "../src/types";
@@ -39,8 +40,8 @@ describe("system prompts", () => {
       extractionSystem(),
       evaluationSystem(),
       translationSystem(),
-      consistencySystem(),
       humanizationSystem(),
+      verificationSystem(),
     ]) {
       expect(system).toContain("BLIND INPUT");
     }
@@ -49,14 +50,14 @@ describe("system prompts", () => {
   test("gendered forms are gated on evidence", () => {
     expect(translationSystem()).toContain("solid evidence");
     expect(translationSystem()).toContain("ฉัน, เรา, คุณ");
-    expect(consistencySystem()).toContain("strip gendered particles");
+    expect(verificationSystem()).toContain("contradicts the field");
   });
 
   test("speaker is never read off neighbouring cues or previous output", () => {
     for (const system of [
       translationSystem(),
-      consistencySystem(),
       humanizationSystem(),
+      verificationSystem(),
     ]) {
       expect(system).toContain("BLIND INPUT");
       expect(system).toContain("per cue");
@@ -103,11 +104,17 @@ describe("stage prompts", () => {
   });
 
   test("review stages pair original and translated per cue", () => {
-    const prompt = humanizationPrompt(input());
-    expect(prompt).toContain("<cues>");
-    expect(prompt).toContain('"original": "Hola"');
-    expect(prompt).toContain('"translated": "สวัสดี"');
-    expect(prompt).toContain("who speaks or who is addressed");
+    for (const prompt of [
+      humanizationPrompt(input()),
+      verificationPrompt(input()),
+    ]) {
+      expect(prompt).toContain("<cues>");
+      expect(prompt).toContain('"original": "Hola"');
+      expect(prompt).toContain('"translated": "สวัสดี"');
+    }
+    expect(humanizationPrompt(input())).toContain(
+      "who speaks or who is addressed",
+    );
   });
 
   test("previous output block appears only when output exists", () => {

@@ -1,5 +1,5 @@
 export type PipelineStage =
-  "extraction" | "evaluation" | "translation" | "consistency" | "humanization";
+  "extraction" | "evaluation" | "translation" | "humanization";
 
 /**
  * Per-cue classification from the evaluation stage — who speaks and who is

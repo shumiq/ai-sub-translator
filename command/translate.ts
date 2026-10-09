@@ -15,7 +15,6 @@ const STAGES: PipelineStage[] = [
   "extraction",
   "evaluation",
   "translation",
-  "consistency",
   "humanization",
 ];
 

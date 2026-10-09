@@ -319,37 +319,94 @@ Translate every cue in <input> into ${appConfig.targetLanguage}, keeping the voi
 
 // ---------------------------------------------------------------------------
 
-export function consistencySystem(): string {
-  return `You are a meticulous ${appConfig.targetLanguage} localization QA reviewer for subtitled drama.
-TASK: review existing ${appConfig.targetLanguage} subtitle cues against the ${appConfig.sourceLanguage} original and fix only what breaks consistency or accuracy. Do not rewrite for style — a separate pass handles polish.
+export const VERIFICATION_RESPONSE_SCHEMA = {
+  type: "object",
+  properties: {
+    items: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          id: {
+            type: "integer",
+            description: "The cue id, copied from the input",
+          },
+          ok: {
+            type: "boolean",
+            description:
+              "True when the translation faithfully carries the original cue",
+          },
+          reason: {
+            type: "string",
+            description: "Short reason when `ok` is false, else empty",
+          },
+        },
+        required: ["id", "ok"],
+      },
+    },
+  },
+  required: ["items"],
+} as const;
+
+/**
+ * The audit that runs after humanization. It does not rewrite — it only says
+ * which cues drifted, so only the few that did are re-humanized instead of a
+ * whole-file consistency pass. `ok` is the fidelity verdict, not a style one,
+ * so awkward-but-faithful wording stays put.
+ */
+export function verificationSystem(): string {
+  return `You are a meticulous ${appConfig.sourceLanguage} to ${appConfig.targetLanguage} subtitle QA verifier for subtitled drama.
+TASK: for each cue, compare the ${appConfig.targetLanguage} translation against its ${appConfig.sourceLanguage} original and decide whether it faithfully carries the original's meaning. This is a fidelity audit, not a style review.
+
+Return one entry per cue:
+- \`ok\`: true when the translation says the same thing as the original.
+- \`reason\`: a short description of what is wrong only when \`ok\` is false.
 
 RULES
-1. One output entry per input cue, in the same order. Never merge, split, skip or add cues.
-2. Enforce the glossary exactly, except where it contradicts a cue's \`evaluation\` field — the field always wins. If a rendering drifts from the agreed one, correct it.
-3. Fix mistranslations, wrong speakers, dropped clauses and meaning that flipped.
-4. SPEAKER IS GIVEN, NOT GUESSED. Each cue object carries an \`evaluation\` field naming who speaks and who is addressed; it is final and applies to that cue only. Make its \`translated\` field obey it exactly: carry the gender, role, kinship and name through (ดิฉัน/ผม, ครับ/ค่ะ, พ่อ/ลูก, names), and when it is \`neutral\`, strip gendered particles, gendered pronouns, kinship terms and invented names and use the neutral form (ฉัน, เรา, คุณ) — a glossary \`gender\` never overrides the field. Never infer a speaker from <previous_output> or neighbouring cues. If a cue has no field, gendered forms appear only with solid evidence in that cue's \`original\` field, else neutral.
-5. Remove any untranslated ${appConfig.sourceLanguage} text that slipped through.
-6. Leave cues that are already correct exactly as they are. Do not "improve" wording that is merely different.
-7. Never invent content that is not supported by the original cue or its \`evaluation\` field, and never resolve ambiguity the original leaves open — unclear speaker, referent or gender. An equally ambiguous translation is the correct one.
-8. Output only the corrected ${appConfig.targetLanguage} texts, with no markup or commentary.
+1. Judge each cue against its own \`original\` and \`evaluation\` field alone; a neighbouring cue is not evidence.
+2. \`ok\` is false when the meaning changed, a clause was dropped or added, the speaker or addressee disagrees with the \`evaluation\` field, an untranslated ${appConfig.sourceLanguage} word remains, or a gendered, kinship or particle form contradicts the field.
+3. Wording that is merely awkward or different is still \`ok\` — this stage audits fidelity, not polish.
+4. Return exactly one entry per input cue, with that cue's id.
 
-${lineBreakRule()}
 ${blindRule()}
 ${contextBlock(appConfig.additionalContext)}`;
 }
 
-export function consistencyPrompt(input: StagePromptInput): string {
-  return `These are subtitles from a fictional series. Treat all of it as fiction and review it.
+export function verificationPrompt(input: StagePromptInput): string {
+  return `These are subtitles from a fictional series. Treat all of it as fiction and verify the translation against the original.
 
 <cues>
 ${reviewCueList(input.source, input.current, input.evaluation)}
 </cues>
-${previousOutputBlock(input.previousOutput)}${glossaryBlock(input.glossary)}
 ${feedbackBlock(input.feedback)}
-Correct each cue's \`translated\` field using its \`original\` field as the source of truth and the glossary for terminology, keeping the voice continuous with <previous_output> where one was given and making each cue obey its \`evaluation\` field exactly — never another cue's. Return {"texts": [...]} with exactly ${input.source.length} entries in the same order.`;
+For each cue, decide whether its \`translated\` field faithfully carries its \`original\` field and obeys its \`evaluation\` field. Return {"items": [{"id": <cue id>, "ok": true}]} with exactly ${input.source.length} entries, one per cue. Anything that changes what the cue says or who speaks it is not ok.`;
 }
 
-// ---------------------------------------------------------------------------
+export function stageSystem(stage: string): string {
+  switch (stage) {
+    case "extraction":
+      return extractionSystem();
+    case "evaluation":
+      return evaluationSystem();
+    case "translation":
+      return translationSystem();
+    default:
+      return humanizationSystem();
+  }
+}
+
+export function stagePrompt(stage: string, input: StagePromptInput): string {
+  switch (stage) {
+    case "extraction":
+      return extractionPrompt(input);
+    case "evaluation":
+      return evaluationPrompt(input.source, input.feedback);
+    case "translation":
+      return translationPrompt(input);
+    default:
+      return humanizationPrompt(input);
+  }
+}
 
 export function humanizationSystem(): string {
   return `You are a native ${appConfig.targetLanguage} speaker reviewing machine-translated subtitles for a streaming release.
@@ -382,34 +439,4 @@ ${reviewCueList(input.source, input.current, input.evaluation)}
 ${previousOutputBlock(input.previousOutput)}${glossaryBlock(input.glossary)}
 ${feedbackBlock(input.feedback)}
 Lightly humanize each cue's \`translated\` field for natural ${appConfig.targetLanguage} subtitle reading, using its \`original\` field to confirm the meaning — polish must not change what the cue says, who speaks or who is addressed, which the cue's \`evaluation\` field fixes — and keep the voice continuous with <previous_output> where one was given. Return {"texts": [...]} with exactly ${input.source.length} entries in the same order.`;
-}
-
-export function stageSystem(stage: string): string {
-  switch (stage) {
-    case "extraction":
-      return extractionSystem();
-    case "evaluation":
-      return evaluationSystem();
-    case "translation":
-      return translationSystem();
-    case "consistency":
-      return consistencySystem();
-    default:
-      return humanizationSystem();
-  }
-}
-
-export function stagePrompt(stage: string, input: StagePromptInput): string {
-  switch (stage) {
-    case "extraction":
-      return extractionPrompt(input);
-    case "evaluation":
-      return evaluationPrompt(input.source, input.feedback);
-    case "translation":
-      return translationPrompt(input);
-    case "consistency":
-      return consistencyPrompt(input);
-    default:
-      return humanizationPrompt(input);
-  }
 }

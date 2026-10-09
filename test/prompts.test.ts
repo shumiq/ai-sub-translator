@@ -71,9 +71,13 @@ describe("system prompts", () => {
     expect(prompt).toContain("Match its terminology and register");
   });
 
-  test("translation reads for naturalness, not word-for-word", () => {
+  test("translation and humanization read for naturalness, not word-for-word", () => {
     expect(translationSystem()).toContain("reads as if a native");
     expect(translationSystem()).toContain("Translate meaning, not words");
+    expect(humanizationSystem()).toContain("wrote it from scratch");
+    expect(humanizationSystem()).toContain(
+      "The meaning must survive; the shape need not",
+    );
     expect(translationSystem()).not.toContain("equally ambiguous");
   });
 

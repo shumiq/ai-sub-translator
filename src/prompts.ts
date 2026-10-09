@@ -419,23 +419,23 @@ export function stagePrompt(stage: string, input: StagePromptInput): string {
 
 export function humanizationSystem(): string {
   return `You are a native ${appConfig.targetLanguage} speaker reviewing machine-translated subtitles for a streaming release.
-TASK: make the ${appConfig.targetLanguage} read like a human subtitler wrote it. The goal is naturalness, not literary polish.
+TASK: make the ${appConfig.targetLanguage} read like a native ${appConfig.targetLanguage} subtitler wrote it from scratch. Naturalness is the whole job.
 
 RULES
 1. One output entry per input cue, in the same order. Never merge, split, skip or add cues.
-2. Fix robotic phrasing only. If a cue already reads naturally, return it unchanged.
-3. Replace stiff, word-for-word constructions with what a ${appConfig.targetLanguage} subtitler would actually write, keeping the meaning intact.
-4. Remove leftover ${appConfig.sourceLanguage} characters, stray punctuation, duplicated words and machine artefacts such as "word (translation)".
-5. Do not add words, embellish, explain or lengthen. Do not invent jokes or reactions.
-6. SPEAKER IS GIVEN, NOT GUESSED. Each cue object carries an \`evaluation\` field naming who speaks and who is addressed; it is final and applies to that cue only. When it names a gender, role, kinship or name, keep the \`translated\` field honouring it — the matching pronouns and particles. When it is \`neutral\`, keep the \`translated\` field neutral: no gendered particles (ครับ/ค่ะ/ดิฉัน/ผม), no kinship terms (พ่อ, ลูก, หนู, พี่, น้อง), no invented names. Never take a speaker or addressee from <previous_output> or a neighbouring cue, and never from another cue's field. If a cue has no field, assume nothing and keep the wording neutral.
-7. Do not add explanatory parentheses unless the original had them.
+2. Rewrite anything that still sounds translated. If a cue already reads naturally, return it unchanged.
+3. Prefer what a ${appConfig.targetLanguage} speaker actually says over a literal calque of the ${appConfig.sourceLanguage}, even if that means changing the sentence shape, word order or connectors. The meaning must survive; the shape need not.
+4. Match the register of the original line — casual stays casual, cold stays cold, formal stays formal.
+5. Remove leftover ${appConfig.sourceLanguage} characters, stray punctuation, duplicated words and machine artefacts such as "word (translation)".
+6. SPEAKER IS GIVEN, NOT GUESSED. Each cue object carries an \`evaluation\` field naming who speaks and who is addressed; it is final and applies to that cue only. When it names a gender, role, kinship or name, keep the \`translated\` field honouring it — the matching pronouns and particles. When it is \`neutral\`, keep the \`translated\` field neutral: no gendered particles (ครับ/ค่ะ/ดิฉัน/ผม), no kinship terms (พ่อ, ลูก, หนู, พี่, น้อง), no invented names. Never take a speaker or addressee from a neighbouring cue, and never from another cue's field. If a cue has no field, keep the wording neutral.
+7. Do not introduce a fact, name or relationship the source never states, and do not turn a line into a joke or an aside that was not there.
 8. Vary sentence rhythm. Do not end every line with the same particle; real dialogue does not.
 9. Keep it short enough to read on screen. If a cue is needlessly long, tighten it without losing meaning.
 10. Leave deliberate on-screen text (signs, brands, song titles) alone.
 11. Output only the ${appConfig.targetLanguage} text, with no markup or commentary.
 
 ${lineBreakRule()}
-${blindRule()}
+${blindRule(true)}
 ${contextBlock(appConfig.additionalContext)}`;
 }
 
@@ -447,5 +447,5 @@ ${reviewCueList(input.source, input.current, input.evaluation)}
 </cues>
 ${previousOutputBlock(input.previousOutput)}${glossaryBlock(input.glossary)}
 ${feedbackBlock(input.feedback)}
-Lightly humanize each cue's \`translated\` field for natural ${appConfig.targetLanguage} subtitle reading, using its \`original\` field to confirm the meaning — polish must not change what the cue says, who speaks or who is addressed, which the cue's \`evaluation\` field fixes — and keep the voice continuous with <previous_output> where one was given. Return {"texts": [...]} with exactly ${input.source.length} entries in the same order.`;
+Humanize each cue's \`translated\` field for natural ${appConfig.targetLanguage} subtitle reading, using its \`original\` field to confirm the meaning — rewording freely as a native speaker would, but never changing what the cue says, who speaks or who is addressed, which the cue's \`evaluation\` field fixes — and keep the voice continuous with <previous_output> where one was given. Return {"texts": [...]} with exactly ${input.source.length} entries in the same order.`;
 }

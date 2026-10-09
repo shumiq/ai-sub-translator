@@ -63,25 +63,31 @@ check in `test/pipeline.test.ts`.
    written into generated scripts and forced onto every style of an inherited
    source script in `retextAss()`. Never name a font in code or docs — change
    the config and the bundled asset together, or the two contradict each other.
+6. **Leftover drift is reported, never written over.** The verification loop
+   repairs only the cues its audit flagged, gives up after `maxRounds` stalled
+   rounds, and hands the rest back as a terminal listing. Do not make residual
+   drift fatal (the file would be lost for a quality flag) or silent (the
+   operator would review blind).
 
 ## Where things live
 
-| Concern                             | File                         |
-| ----------------------------------- | ---------------------------- |
-| All tunables                        | `config.ts`                  |
-| Shared types                        | `src/types.ts`               |
-| Gemini calls, key rotation, retries | `src/ai/client.ts`           |
-| Retry-on-feedback, chunk bisection  | `src/pipeline/stage.ts`      |
-| Glossary sweep                      | `src/pipeline/glossary.ts`   |
-| Cue speaker/addressee verdicts      | `src/pipeline/evaluation.ts` |
-| Stage orchestration                 | `src/pipeline/index.ts`      |
-| Prompt text                         | `src/prompts.ts`             |
-| Chunk validation                    | `src/validate.ts`            |
-| Bad-character check for output      | `src/badchars.ts`            |
-| SRT read/write                      | `src/subtitle/srt.ts`        |
-| ASS read/write                      | `src/subtitle/ass.ts`        |
-| ffmpeg/ffprobe wrappers             | `src/ffmpeg.ts`              |
-| Subtitle-stream listing             | `src/streams.ts`             |
+| Concern                             | File                           |
+| ----------------------------------- | ------------------------------ |
+| All tunables                        | `config.ts`                    |
+| Shared types                        | `src/types.ts`                 |
+| Gemini calls, key rotation, retries | `src/ai/client.ts`             |
+| Retry-on-feedback, chunk bisection  | `src/pipeline/stage.ts`        |
+| Glossary sweep                      | `src/pipeline/glossary.ts`     |
+| Cue speaker/addressee verdicts      | `src/pipeline/evaluation.ts`   |
+| Post-humanization fidelity audit    | `src/pipeline/verification.ts` |
+| Stage orchestration                 | `src/pipeline/index.ts`        |
+| Prompt text                         | `src/prompts.ts`               |
+| Chunk validation                    | `src/validate.ts`              |
+| Bad-character check for output      | `src/badchars.ts`              |
+| SRT read/write                      | `src/subtitle/srt.ts`          |
+| ASS read/write                      | `src/subtitle/ass.ts`          |
+| ffmpeg/ffprobe wrappers             | `src/ffmpeg.ts`                |
+| Subtitle-stream listing             | `src/streams.ts`               |
 
 ## Conventions
 

@@ -139,8 +139,8 @@ Codecs and rates come from `hardsub` in `config.ts`.
 ## The translation pipeline
 
 Modelled on [shumiq/ai-novel-translator](https://github.com/shumiq/ai-novel-translator),
-adapted from novels to subtitles. Five stages run in order; each one takes the
-output of the previous stage.
+adapted from novels to subtitles. Four stages run in order, each taking the
+output of the previous one; then a verification loop audits the result.
 
 1. **extraction** — Sweeps the source for character names, places and recurring
    jargon, and merges them into `dictionary.json`. Existing entries are never
@@ -150,11 +150,19 @@ output of the previous stage.
    daughter, boss, …), optionally with a name. Neighbouring cues are ignored.
 3. **translation** — Translates every cue, using the glossary for established
    renderings and the evaluation to pick pronouns, particles and kinship terms.
-4. **consistency** — Checks the translation against the original and the
-   glossary. Fixes drift, mistranslations and wrong-speaker errors; leaves
-   correct cues alone.
-5. **humanization** — Light cleanup so the Thai reads like a subtitler wrote
+4. **humanization** — Light cleanup so the Thai reads like a subtitler wrote
    it rather than a machine.
+
+Then, if `humanization` ran, a **verification** loop audits the finished text
+against the source. Only the cues the audit flagged are repaired; each drifted
+cue is sent with a few neighbours for context, but a neighbour's rewrite is
+discarded. The first audit covers every cue; later rounds re-audit only the cues
+that were just drifted, so the drifted count can only stay level or fall —
+never grow. A round that shrinks drift resets the retry budget, so
+`verification.maxRounds` only stops a loop that has stopped improving. Whatever
+drift is left when it gives up is still written out and listed in the terminal
+for manual review. This is why there is no separate whole-file consistency
+pass: detection reads the whole file once, repair touches only what was wrong.
 
 ### Why cues, not lines
 
@@ -223,7 +231,7 @@ dictionary.json   shared glossary (git-ignored; safe to edit in place)
 test/        unit + pipeline regression tests
 src/
   ai/        Gemini client, key rotation, typed errors
-  pipeline/  stage runner, glossary sweep, cue evaluation, orchestrator
+  pipeline/  stage runner, glossary sweep, cue evaluation, verification audit, orchestrator
   subtitle/  SRT parse/stringify, ASS <-> SRT
   dictionary.ts  glossary load/save/filtering
   streams.ts     subtitle-stream listing (codec, language)

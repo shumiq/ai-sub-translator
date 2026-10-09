@@ -8,7 +8,7 @@
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",
     "check": "bun run typecheck && bun run test",
-    "commit": "opencode run --auto --message \"Stage and commit current changes. Review docs (.md) for updates. Check for bugs or mistakes. Split into multiple commits if logical groups differ.\" --model opencode/big-pickle --variant minimal"
+    "commit": "opencode run --auto --message \"Stage changes and create logical, split commits.\" --model opencode/big-pickle --variant minimal"
   },
   "devDependencies": {
     "@types/bun": "latest",

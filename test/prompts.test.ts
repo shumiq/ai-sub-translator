@@ -47,27 +47,34 @@ describe("system prompts", () => {
     }
   });
 
-  test("gendered forms are gated on evidence", () => {
-    expect(translationSystem()).toContain("solid evidence");
+  test("gendered forms are gated on the evaluation field", () => {
+    expect(translationSystem()).toContain("SPEAKER IS GIVEN");
     expect(translationSystem()).toContain("ฉัน, เรา, คุณ");
     expect(verificationSystem()).toContain("contradicts the field");
   });
 
-  test("speaker is never read off neighbouring cues or previous output", () => {
+  test("speaker still comes from the evaluation field, never neighbours", () => {
     for (const system of [
       translationSystem(),
       humanizationSystem(),
       verificationSystem(),
     ]) {
       expect(system).toContain("BLIND INPUT");
-      expect(system).toContain("per cue");
+      expect(system).toContain("evaluation");
     }
+    expect(translationSystem()).toContain("Never read a speaker");
     expect(translationSystem()).toContain("kinship");
     expect(humanizationSystem()).toContain("kinship");
     const prompt = translationPrompt(
       input({ previousOutput: [{ id: 0, text: "ลูกกลับมาแล้วค่ะ" }] }),
     );
-    expect(prompt).toContain("not evidence about who speaks");
+    expect(prompt).toContain("Match its terminology and register");
+  });
+
+  test("translation reads for naturalness, not word-for-word", () => {
+    expect(translationSystem()).toContain("reads as if a native");
+    expect(translationSystem()).toContain("Translate meaning, not words");
+    expect(translationSystem()).not.toContain("equally ambiguous");
   });
 
   test("extraction refuses to guess gender or roles", () => {

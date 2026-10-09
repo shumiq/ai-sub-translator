@@ -40,15 +40,15 @@ const previousInputBlock = (cues: Cue[]): string =>
 
 /**
  * What this run has already produced for the cues before this chunk, so
- * terminology and wording stay continuous across chunk boundaries. It is
- * deliberately not offered as evidence about people: the model is blind, so
- * reading speaker, gender or register off its own earlier output is guessing,
- * and that guess is the failure mode this block must not invite.
+ * terminology and register stay continuous across chunk boundaries. Continuity
+ * here is about voice, not people: the fill loop reads speaker and gender off
+ * each cue's `evaluation` field, so this block is free to carry tone and
+ * terminology forward without inviting a guess.
  */
 const previousOutputBlock = (cues: PromptCue[]): string =>
   cues.length === 0
     ? ""
-    : `\n<previous_output>\nAlready-translated ${appConfig.targetLanguage} output immediately before this chunk. Match its terminology and wording style so the scene does not change voice mid-file. It is not evidence about who speaks: inherit no gender, no ending particle, no kinship or self-reference term from it. Who speaks a cue is decided by that cue's own text alone.\n${cueList(cues)}\n</previous_output>\n`;
+    : `\n<previous_output>\nAlready-translated ${appConfig.targetLanguage} output immediately before this chunk. Match its terminology and register so the scene keeps one voice and does not change mid-file. Who speaks is still decided per cue by that cue's \`evaluation\` field, not by this text.\n${cueList(cues)}\n</previous_output>\n`;
 
 /**
  * Renders source cues for a prompt with the evaluation stage's verdict attached
@@ -137,9 +137,18 @@ const lineBreakRule = () =>
  * The model gets cue text and nothing else — no video, audio, speaker labels
  * or plot knowledge. Stated once here so every stage inherits it instead of
  * each inventing its own version of "do not guess".
+ *
+ * `natural` is for the stages that write prose (translation, humanization).
+ * They still may not fabricate people or facts, but they are allowed to lean
+ * on the surrounding cues and <previous_output> for voice and reference
+ * resolution — with a reliable evaluation pass and fix loop behind them, the
+ * older forbid-all-ambiguity wording was buying correctness the pipeline
+ * already enforces, at the cost of robotic output.
  */
-const blindRule = () =>
-  `BLIND INPUT: you see subtitle text only — no video, audio, speaker labels or knowledge of the plot. Never invent what the cues do not state: who speaks, who is addressed, gender, relationships, setting, events. This holds per cue: a neighbouring cue or <previous_output> says nothing about who speaks this cue. The one exception is a cue's own \`evaluation\` field, when one is present: it is given rather than guessed, so obey it exactly for that cue and never import another cue's field. Where nothing settles the question, keep the ${appConfig.targetLanguage} equally ambiguous — resolving ambiguity is guessing.`;
+const blindRule = (natural = false) =>
+  natural
+    ? `BLIND INPUT: you see subtitle text only — no video, audio, speaker labels or knowledge of the plot. Never fabricate a person, relationship, setting or event the cues never state. A cue's own \`evaluation\` field settles who speaks it: obey that field exactly and never import another cue's field. Within those bounds, write the way a native ${appConfig.targetLanguage} speaker naturally would — read the surrounding cues and <previous_output> to resolve references and keep the scene's voice continuous, instead of translating each cue in a vacuum.`
+    : `BLIND INPUT: you see subtitle text only — no video, audio, speaker labels or knowledge of the plot. Never invent what the cues do not state: who speaks, who is addressed, gender, relationships, setting, events. This holds per cue: a neighbouring cue or <previous_output> says nothing about who speaks this cue. The one exception is a cue's own \`evaluation\` field, when one is present: it is given rather than guessed, so obey it exactly for that cue and never import another cue's field. Where nothing settles the question, keep the ${appConfig.targetLanguage} equally ambiguous — resolving ambiguity is guessing.`;
 
 export const TEXTS_RESPONSE_SCHEMA = {
   type: "object",
@@ -289,21 +298,21 @@ Classify every cue in <input> independently, as though it were the only cue. Ret
 
 export function translationSystem(): string {
   return `You are a professional ${appConfig.sourceLanguage} to ${appConfig.targetLanguage} subtitle translator.
-TASK: translate the given ${appConfig.sourceLanguage} subtitle cues into natural ${appConfig.targetLanguage}.
+TASK: translate the given ${appConfig.sourceLanguage} subtitle cues into ${appConfig.targetLanguage} that reads as if a native ${appConfig.targetLanguage} screenwriter wrote it — not as if it were converted word-for-word from ${appConfig.sourceLanguage}.
 
-NON-NEGOTIABLE RULES
+RULES
 1. One output entry per input cue, in the same order. Never merge cues, never split a cue, never skip a cue, never add one.
-2. Subtitles are read at a glance. Translate for the ear of a ${appConfig.targetLanguage} viewer watching in real time: concise, idiomatic, and no more verbose than the source.
-3. Honour speaker intent — sarcasm, teasing, anger, formal register and foreign-accented speech should survive the translation.
-4. Keep established glossary renderings, but a \`gender\` or \`speakingStyle\` in the glossary never overrides a cue's \`evaluation\` field. Do not carry a register, self-reference or particle choice across cues — each cue's speaker is decided by that cue alone.
-5. SPEAKER IS GIVEN, NOT GUESSED. Every input cue carries an \`evaluation\` field from a prior pass naming who speaks and who is addressed. Treat it as final and apply it to that cue only: carry a gendered or role value through exactly — first-person pronouns (ดิฉัน/ผม/ฉัน), ending particles (ครับ/ค่ะ/คะ), kinship terms and names. When the field is \`neutral\`, the cue must come out neutral — ฉัน, เรา, คุณ — with no gendered particle, no kinship term, no name and no \`ครับ/ค่ะ\`, even where the glossary, the source wording or <previous_output> hints otherwise. Never read a speaker or addressee off a neighbouring cue. If a cue has no \`evaluation\` field, fall back to solid evidence in that cue alone, else neutral.
-6. Add nothing the source does not state: no names for unnamed people, no relationship or kinship terms (e.g. พ่อ, ลูก, หนู, พี่, น้อง), no self-reference the cue does not make, no addressee the cue does not address, no resolving a pronoun whose referent the text never pins down — except where the cue's \`evaluation\` field states it, in which case follow that.
+2. Translate meaning, not words. Recast, reorder or drop source-shaped constructions so the line lands the way a ${appConfig.targetLanguage} viewer expects to hear it. Subtitles are read at a glance, so keep each cue as short as its meaning allows.
+3. Keep the voice: sarcasm, teasing, anger, warmth, formality and foreign-accented speech should all survive the translation.
+4. SPEAKER IS GIVEN, NOT GUESSED. Every input cue carries an \`evaluation\` field from a prior pass naming who speaks and who is addressed. Treat it as final and apply it to that cue only: carry a gendered or role value through exactly — first-person pronouns (ดิฉัน/ผม/ฉัน), ending particles (ครับ/ค่ะ/คะ), kinship terms and names. When the field is \`neutral\`, the cue must come out neutral — ฉัน, เรา, คุณ — with no gendered particle, no kinship term, no name and no \`ครับ/ค่ะ\`. Never read a speaker or addressee off a neighbouring cue. If a cue has no \`evaluation\` field, use whatever that cue itself states, otherwise neutral.
+5. Keep established glossary renderings. A glossary \`gender\` or \`speakingStyle\` never overrides a cue's \`evaluation\` field.
+6. Do not invent a fact, name, relationship or event the source never states. Naturalness is the phrasing a native speaker would choose, not added content the original did not have.
 7. Never leave ${appConfig.sourceLanguage} words untranslated unless they are a deliberate on-screen element (a sign, a brand, a song title).
 8. Do not add explanations, transliterations, speaker labels or commentary. Output only the translations.
 9. Escape nothing: emit plain ${appConfig.targetLanguage} text. Do not include ASS/SRT markup.
 
 ${lineBreakRule()}
-${blindRule()}
+${blindRule(true)}
 ${contextBlock(appConfig.additionalContext)}`;
 }
 
